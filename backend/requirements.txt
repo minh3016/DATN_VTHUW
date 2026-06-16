@@ -1,0 +1,39 @@
+# ============================================================
+# requirements.txt – Backend Vehicle Classification AI
+# Python 3.10 / 3.11
+# Cài đặt: pip install -r requirements.txt
+# ============================================================
+
+# ── Web Framework ──────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+websockets>=12.0
+aiofiles>=23.2.1
+
+# ── Database ───────────────────────────────────────────────────
+motor>=3.4.0
+pymongo>=4.7.2
+
+# ── AI / Computer Vision ───────────────────────────────────────
+ultralytics>=8.2.0     # YOLOv8 fallback + utilities
+opencv-python>=4.9.0.80
+numpy>=1.26.0
+Pillow>=10.3.0
+torch>=2.0.0           # Required for YOLOv7
+torchvision>=0.15.0    # NMS utilities
+pandas>=2.0.0          # Required by YOLOv7 model
+scipy>=1.10.0          # Required by YOLOv7 model
+matplotlib>=3.7.0      # Required by YOLOv7 model
+seaborn>=0.12.0        # Required by YOLOv7 model
+tqdm>=4.65.0           # Required by YOLOv7 model
+PyYAML>=6.0            # Required by YOLOv7 model
+
+# ── Utility ────────────────────────────────────────────────────
+python-dotenv>=1.0.1
+pydantic>=2.7.0
+
+# ── Dev / Testing ──────────────────────────────────────────────
+httpx>=0.27.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

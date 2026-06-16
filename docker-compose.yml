@@ -1,0 +1,79 @@
+version: '3.9'
+
+services:
+  # ── MongoDB ───────────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0
+    container_name: traffic_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: traffic_monitoring
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Mongo Express (UI) ────────────────────────────────────────
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: traffic_mongo_ui
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ""
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ""
+
+  # ── Backend FastAPI ───────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: traffic_backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: traffic_monitoring
+      VEHICLE_MODEL_PATH: /models/vehicle_detection.pt
+      HELMET_MODEL_PATH: /models/helmet_detection.pt
+      PLATE_MODEL_PATH: /models/license_plate_detection.pt
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      VEHICLE_CONF: "0.45"
+      HELMET_CONF: "0.45"
+      PLATE_CONF: "0.40"
+    volumes:
+      - ./models:/models:ro       # mount thư mục models
+      - ./samples:/samples:ro     # mount video mẫu
+      - ./backend:/app            # hot-reload (dev)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  default:
+    name: traffic_network
