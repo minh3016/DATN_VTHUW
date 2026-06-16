@@ -88,25 +88,125 @@ Write-Host ""
 
 Write-Step "Kiem tra phan mem can thiet"
 
-# Python
-if (Test-Command "python") {
-    $pyVersion = python --version 2>&1
-    Write-OK "Python: $pyVersion"
+# Python - Tim lenh Python that (tranh Windows Store alias)
+$PythonCmd = $null
+$pythonFound = $false
 
-    # Kiem tra phien ban
-    $pyVer = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>&1
-    if ([double]$pyVer -lt 3.10) {
-        Write-Warn "Python $pyVer nho hon 3.10. Khuyen nghi dung Python 3.10 hoac 3.11"
+# Thu cac lenh theo thu tu uu tien
+foreach ($tryCmd in @("python", "python3", "py")) {
+    if (Test-Command $tryCmd) {
+        # Chay thu de kiem tra co phai Python that hay alias Microsoft Store
+        $testOutput = ""
+        try {
+            if ($tryCmd -eq "py") {
+                $testOutput = & py -3 --version 2>&1 | Out-String
+            } else {
+                $testOutput = & $tryCmd --version 2>&1 | Out-String
+            }
+        } catch {
+            continue
+        }
+
+        # Kiem tra output co chua "Python 3.x" khong
+        if ($testOutput -match "Python\s+3\.\d+") {
+            $pythonFound = $true
+            if ($tryCmd -eq "py") {
+                $PythonCmd = "py"
+            } else {
+                $PythonCmd = $tryCmd
+            }
+            $pyVersion = $testOutput.Trim()
+            Write-OK "Python: $pyVersion (lenh: $PythonCmd)"
+
+            # Kiem tra phien ban >= 3.10
+            if ($testOutput -match "Python\s+3\.(\d+)") {
+                $pyMinor = [int]$Matches[1]
+                if ($pyMinor -lt 10) {
+                    Write-Warn "Python 3.$pyMinor nho hon 3.10. Khuyen nghi dung Python 3.10 hoac 3.11"
+                }
+            }
+            break
+        }
     }
-} else {
-    Write-Err "Python chua duoc cai dat!"
-    Write-Info "Tai tai: https://www.python.org/downloads/"
-    Write-Info "Luu y: Tick chon 'Add Python to PATH' khi cai dat"
+}
+
+if (-not $pythonFound) {
+    Write-Warn "Python chua duoc cai dat (hoac chi co alias Microsoft Store)"
+    Write-Info ""
+
+    # Thu cai tu dong bang winget
+    if (Test-Command "winget") {
+        Write-Info "Dang cai dat Python 3.11 bang winget..."
+        Write-Info "(Qua trinh nay co the mat vai phut)"
+        Write-Host ""
+        winget install Python.Python.3.11 --accept-source-agreements --accept-package-agreements --silent 2>&1 | ForEach-Object {
+            if ($_ -match "Successfully|successfully|thanh cong") {
+                Write-OK $_
+            } elseif ($_ -match "Found|Downloading|Installing") {
+                Write-Info $_
+            }
+        }
+
+        # Refresh PATH sau khi cai dat
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+
+        # Tat Windows Store alias (neu co quyen)
+        $aliasPath = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+        $pythonAlias = Join-Path $aliasPath "python.exe"
+        $python3Alias = Join-Path $aliasPath "python3.exe"
+        if (Test-Path $pythonAlias) {
+            Remove-Item $pythonAlias -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $python3Alias) {
+            Remove-Item $python3Alias -Force -ErrorAction SilentlyContinue
+        }
+
+        # Thu detect lai
+        Start-Sleep -Seconds 2
+        foreach ($tryCmd in @("python", "python3", "py")) {
+            if (Test-Command $tryCmd) {
+                $testOutput = ""
+                try {
+                    if ($tryCmd -eq "py") {
+                        $testOutput = & py -3 --version 2>&1 | Out-String
+                    } else {
+                        $testOutput = & $tryCmd --version 2>&1 | Out-String
+                    }
+                } catch { continue }
+
+                if ($testOutput -match "Python\s+3\.\d+") {
+                    $pythonFound = $true
+                    if ($tryCmd -eq "py") { $PythonCmd = "py" } else { $PythonCmd = $tryCmd }
+                    $pyVersion = $testOutput.Trim()
+                    Write-OK "Python da cai thanh cong: $pyVersion (lenh: $PythonCmd)"
+                    break
+                }
+            }
+        }
+
+        if (-not $pythonFound) {
+            Write-Err "Cai Python xong nhung chua nhan duoc lenh python."
+            Write-Info "Vui long DONG VA MO LAI PowerShell roi chay lai: .\setup.ps1"
+        }
+    } else {
+        Write-Err "Khong tim thay winget de cai tu dong."
+        Write-Info ""
+        Write-Info "Cai dat thu cong:"
+        Write-Info "  1. Tai Python tai: https://www.python.org/downloads/"
+        Write-Info "  2. Khi cai dat, TICK CHON 'Add Python to PATH'"
+        Write-Info "  3. Tat alias Microsoft Store:"
+        Write-Info '     Settings -> Apps -> Advanced app settings -> App execution aliases'
+        Write-Info '     Tim va tat python.exe, python3.exe'
+        Write-Info ""
+        Write-Info "  Sau khi cai xong, DONG VA MO LAI PowerShell roi chay lai setup.ps1"
+    }
 }
 
 # Node.js
+$nodeFound = $false
 if (Test-Command "node") {
     $nodeVersion = node --version 2>&1
+    $nodeFound = $true
     Write-OK "Node.js: $nodeVersion"
 
     $nodeMajor = ($nodeVersion -replace 'v','').Split('.')[0]
@@ -114,14 +214,44 @@ if (Test-Command "node") {
         Write-Warn "Node.js $nodeVersion nho hon 18. Khuyen nghi dung Node.js 18 LTS tro len"
     }
 } else {
-    Write-Err "Node.js chua duoc cai dat!"
-    Write-Info "Tai tai: https://nodejs.org/"
+    Write-Warn "Node.js chua duoc cai dat"
+
+    # Thu cai tu dong bang winget
+    if (Test-Command "winget") {
+        Write-Info "Dang cai dat Node.js LTS bang winget..."
+        Write-Host ""
+        winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>&1 | ForEach-Object {
+            if ($_ -match "Successfully|successfully") {
+                Write-OK $_
+            } elseif ($_ -match "Found|Downloading|Installing") {
+                Write-Info $_
+            }
+        }
+
+        # Refresh PATH
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        Start-Sleep -Seconds 2
+
+        if (Test-Command "node") {
+            $nodeVersion = node --version 2>&1
+            $nodeFound = $true
+            Write-OK "Node.js da cai thanh cong: $nodeVersion"
+        } else {
+            Write-Err "Cai Node.js xong nhung chua nhan duoc lenh node."
+            Write-Info "Vui long DONG VA MO LAI PowerShell roi chay lai: .\setup.ps1"
+        }
+    } else {
+        Write-Err "Khong tim thay winget de cai tu dong."
+        Write-Info "Tai thu cong: https://nodejs.org/"
+    }
 }
 
 # npm
 if (Test-Command "npm") {
     $npmVersion = npm --version 2>&1
     Write-OK "npm: v$npmVersion"
+} elseif ($nodeFound) {
+    Write-Warn "npm chua san sang. Thu dong va mo lai PowerShell."
 } else {
     Write-Err "npm chua duoc cai dat (thuong di kem Node.js)"
 }
@@ -135,9 +265,17 @@ if (Test-Command "git") {
 }
 
 # Dung neu thieu Python hoac Node.js
-if (-not (Test-Command "python") -or -not (Test-Command "node")) {
+if (-not $pythonFound -or -not $nodeFound) {
     Write-Host ""
-    Write-Host "  Thieu phan mem bat buoc. Vui long cai dat truoc khi chay lai." -ForegroundColor Red
+    Write-Host "  Thieu phan mem bat buoc." -ForegroundColor Red
+    if (-not $pythonFound -and -not $nodeFound) {
+        Write-Host "  Can cai: Python, Node.js" -ForegroundColor Red
+    } elseif (-not $pythonFound) {
+        Write-Host "  Can cai: Python" -ForegroundColor Red
+    } else {
+        Write-Host "  Can cai: Node.js" -ForegroundColor Red
+    }
+    Write-Host "  Neu vua cai xong, DONG VA MO LAI PowerShell roi chay lai: .\setup.ps1" -ForegroundColor Yellow
     Write-Host ""
     exit 1
 }
@@ -233,7 +371,11 @@ if (Test-Path $venvPython) {
 } else {
     Write-Info "Dang tao virtual environment..."
     Push-Location $BackendDir
-    python -m venv .venv 2>&1
+    if ($PythonCmd -eq "py") {
+        py -3 -m venv .venv 2>&1
+    } else {
+        & $PythonCmd -m venv .venv 2>&1
+    }
     Pop-Location
 
     if (Test-Path $venvPython) {
@@ -242,7 +384,7 @@ if (Test-Path $venvPython) {
         Write-Err "Khong the tao virtual environment!"
         Write-Info "Thu chay thu cong:"
         Write-Info "  cd backend"
-        Write-Info "  python -m venv .venv"
+        Write-Info "  $PythonCmd -m venv .venv"
     }
 }
 
