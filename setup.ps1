@@ -1,6 +1,6 @@
 # ============================================================
-# setup.ps1 – Cài đặt môi trường cho Vehicle Classification AI
-# Chạy 1 lần duy nhất sau khi clone repo từ GitHub
+# setup.ps1 - Cai dat moi truong cho Vehicle Classification AI
+# Chay 1 lan duy nhat sau khi clone repo tu GitHub
 # Usage: .\setup.ps1
 # ============================================================
 
@@ -22,7 +22,7 @@ if ($Help) {
     exit 0
 }
 
-# ── Biến cấu hình ─────────────────────────────────────────────
+# -- Bien cau hinh --
 $ProjectRoot = $PSScriptRoot
 $BackendDir  = Join-Path $ProjectRoot "backend"
 $FrontendDir = Join-Path $ProjectRoot "frontend"
@@ -33,7 +33,7 @@ $StepCurrent = 0
 $Errors      = @()
 $Warnings    = @()
 
-# ── Hàm tiện ích ──────────────────────────────────────────────
+# -- Ham tien ich --
 
 function Write-Step {
     param([string]$Message)
@@ -70,20 +70,20 @@ function Test-Command {
     return [bool](Get-Command $Command -ErrorAction SilentlyContinue)
 }
 
-# ── Banner ────────────────────────────────────────────────────
+# -- Banner --
 
 Clear-Host
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║   Vehicle Classification AI - Setup Script   ║" -ForegroundColor Cyan
-Write-Host "  ║   Cai dat moi truong lan dau sau khi clone   ║" -ForegroundColor Cyan
-Write-Host "  ╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  ====================================================" -ForegroundColor Cyan
+Write-Host "    Vehicle Classification AI - Setup Script" -ForegroundColor Cyan
+Write-Host "    Cai dat moi truong lan dau sau khi clone" -ForegroundColor Cyan
+Write-Host "  ====================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Thu muc du an: $ProjectRoot" -ForegroundColor DarkGray
 Write-Host ""
 
 # ============================================================
-# BƯỚC 1: Kiểm tra phần mềm cần thiết
+# BUOC 1: Kiem tra phan mem can thiet
 # ============================================================
 
 Write-Step "Kiem tra phan mem can thiet"
@@ -93,10 +93,10 @@ if (Test-Command "python") {
     $pyVersion = python --version 2>&1
     Write-OK "Python: $pyVersion"
 
-    # Kiểm tra phiên bản >= 3.10
+    # Kiem tra phien ban
     $pyVer = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>&1
     if ([double]$pyVer -lt 3.10) {
-        Write-Warn "Python $pyVer < 3.10. Khuyen nghi dung Python 3.10 hoac 3.11"
+        Write-Warn "Python $pyVer nho hon 3.10. Khuyen nghi dung Python 3.10 hoac 3.11"
     }
 } else {
     Write-Err "Python chua duoc cai dat!"
@@ -111,7 +111,7 @@ if (Test-Command "node") {
 
     $nodeMajor = ($nodeVersion -replace 'v','').Split('.')[0]
     if ([int]$nodeMajor -lt 18) {
-        Write-Warn "Node.js $nodeVersion < 18. Khuyen nghi dung Node.js 18 LTS tro len"
+        Write-Warn "Node.js $nodeVersion nho hon 18. Khuyen nghi dung Node.js 18 LTS tro len"
     }
 } else {
     Write-Err "Node.js chua duoc cai dat!"
@@ -134,7 +134,7 @@ if (Test-Command "git") {
     Write-Warn "Git chua duoc cai dat (khong bat buoc neu da clone xong)"
 }
 
-# Dừng nếu thiếu Python hoặc Node.js
+# Dung neu thieu Python hoac Node.js
 if (-not (Test-Command "python") -or -not (Test-Command "node")) {
     Write-Host ""
     Write-Host "  Thieu phan mem bat buoc. Vui long cai dat truoc khi chay lai." -ForegroundColor Red
@@ -143,7 +143,7 @@ if (-not (Test-Command "python") -or -not (Test-Command "node")) {
 }
 
 # ============================================================
-# BƯỚC 2: Kiểm tra MongoDB
+# BUOC 2: Kiem tra MongoDB
 # ============================================================
 
 Write-Step "Kiem tra MongoDB"
@@ -153,7 +153,7 @@ if ($SkipMongoDB) {
 } else {
     $mongoFound = $false
 
-    # Kiểm tra MongoDB service (cài local)
+    # Kiem tra MongoDB service (cai local)
     $svc = Get-Service -Name "MongoDB" -ErrorAction SilentlyContinue
     if ($svc) {
         $mongoFound = $true
@@ -177,14 +177,14 @@ if ($SkipMongoDB) {
         }
     }
 
-    # Kiểm tra Docker
+    # Kiem tra Docker
     if (-not $mongoFound -and (Test-Command "docker")) {
         $dockerMongo = docker ps --filter "name=traffic_mongo" --format "{{.Names}}" 2>&1
         if ($dockerMongo -match "traffic_mongo") {
             $mongoFound = $true
             Write-OK "MongoDB dang chay trong Docker (traffic_mongo)"
         } else {
-            # Thử khởi động bằng docker-compose
+            # Thu khoi dong bang docker-compose
             $composeFile = Join-Path $ProjectRoot "docker-compose.yml"
             if (Test-Path $composeFile) {
                 Write-Info "Tim thay docker-compose.yml. Dang khoi dong MongoDB container..."
@@ -217,7 +217,7 @@ if ($SkipMongoDB) {
 }
 
 # ============================================================
-# BƯỚC 3: Cài đặt Backend Python
+# BUOC 3: Cai dat Backend Python
 # ============================================================
 
 Write-Step "Cai dat Backend (Python)"
@@ -227,7 +227,7 @@ $venvPython  = Join-Path $venvPath "Scripts\python.exe"
 $venvPip     = Join-Path $venvPath "Scripts\pip.exe"
 $reqFile     = Join-Path $BackendDir "requirements.txt"
 
-# Tạo virtual environment
+# Tao virtual environment
 if (Test-Path $venvPython) {
     Write-OK "Virtual environment da ton tai (.venv)"
 } else {
@@ -240,30 +240,32 @@ if (Test-Path $venvPython) {
         Write-OK "Tao .venv thanh cong"
     } else {
         Write-Err "Khong the tao virtual environment!"
-        Write-Info "Thu chay thu cong: cd backend && python -m venv .venv"
+        Write-Info "Thu chay thu cong:"
+        Write-Info "  cd backend"
+        Write-Info "  python -m venv .venv"
     }
 }
 
-# Cài đặt dependencies
+# Cai dat dependencies
 if (Test-Path $venvPip) {
     Write-Info "Dang cai dat thu vien Python (co the mat 5-15 phut)..."
     Write-Host ""
 
-    # Upgrade pip trước
+    # Upgrade pip truoc
     & $venvPython -m pip install --upgrade pip 2>&1 | Out-Null
 
-    # Cài requirements
+    # Cai requirements
     & $venvPip install -r $reqFile 2>&1 | ForEach-Object {
         if ($_ -match "^Successfully installed") {
             Write-OK $_
         } elseif ($_ -match "^(ERROR|Could not)") {
             Write-Err $_
         } elseif ($_ -match "already satisfied") {
-            # Bỏ qua, giảm noise
+            # Bo qua, giam noise
         }
     }
 
-    # Kiểm tra các package chính đã cài thành công
+    # Kiem tra cac package chinh da cai thanh cong
     $checkPackages = @("fastapi", "uvicorn", "torch", "cv2", "ultralytics", "motor")
     $allOK = $true
     foreach ($pkg in $checkPackages) {
@@ -288,7 +290,7 @@ if (Test-Path $venvPip) {
 }
 
 # ============================================================
-# BƯỚC 4: Cài đặt Frontend (Node.js)
+# BUOC 4: Cai dat Frontend (Node.js)
 # ============================================================
 
 Write-Step "Cai dat Frontend (Vue.js + Vite)"
@@ -297,7 +299,7 @@ $nodeModules = Join-Path $FrontendDir "node_modules"
 
 if (Test-Path $nodeModules) {
     $pkgCount = (Get-ChildItem $nodeModules -Directory).Count
-    Write-OK "node_modules da ton tai ($pkgCount packages)"
+    Write-OK "node_modules da ton tai ($($pkgCount) packages)"
     Write-Info "Dang kiem tra cap nhat..."
 }
 
@@ -310,11 +312,13 @@ if ($LASTEXITCODE -eq 0) {
     Write-OK "npm install thanh cong"
 } else {
     Write-Err "npm install that bai!"
-    Write-Info "Thu chay thu cong: cd frontend && npm install"
+    Write-Info "Thu chay thu cong:"
+    Write-Info "  cd frontend"
+    Write-Info "  npm install"
 }
 
 # ============================================================
-# BƯỚC 5: Tạo file .env
+# BUOC 5: Tao file .env
 # ============================================================
 
 Write-Step "Tao file cau hinh .env"
@@ -329,29 +333,30 @@ if (Test-Path $backendEnv) {
     Copy-Item $backendEnvExample $backendEnv
     Write-OK "Tao backend\.env tu .env.example"
 } else {
-    # Tạo .env mặc định
-    @"
-# ── MongoDB ────────────────────────────────────────────────────
-MONGO_URI=mongodb://localhost:27017
-MONGO_DB=vehicle_classification
-
-# ── Model Path ─────────────────────────────────────────────────
-VEHICLE_MODEL_PATH=../models/vehicle_detection.pt
-
-# ── Confidence Threshold ──────────────────────────────────────
-VEHICLE_CONF=0.45
-
-# ── Frame Processing ───────────────────────────────────────────
-FRAME_WIDTH=1280
-FRAME_HEIGHT=720
-PROCESS_FPS=3
-
-# ── CORS ───────────────────────────────────────────────────────
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
-
-# ── WebSocket ──────────────────────────────────────────────────
-WS_HEARTBEAT_INTERVAL=30
-"@ | Out-File -FilePath $backendEnv -Encoding UTF8
+    # Tao .env mac dinh
+    $backendEnvContent = @(
+        "# -- MongoDB --"
+        "MONGO_URI=mongodb://localhost:27017"
+        "MONGO_DB=vehicle_classification"
+        ""
+        "# -- Model Path --"
+        "VEHICLE_MODEL_PATH=../models/vehicle_detection.pt"
+        ""
+        "# -- Confidence Threshold --"
+        "VEHICLE_CONF=0.45"
+        ""
+        "# -- Frame Processing --"
+        "FRAME_WIDTH=1280"
+        "FRAME_HEIGHT=720"
+        "PROCESS_FPS=3"
+        ""
+        "# -- CORS --"
+        'CORS_ORIGINS=http://localhost:5173,http://localhost:3000'
+        ""
+        "# -- WebSocket --"
+        "WS_HEARTBEAT_INTERVAL=30"
+    )
+    $backendEnvContent -join "`r`n" | Out-File -FilePath $backendEnv -Encoding UTF8 -NoNewline
     Write-OK "Tao backend\.env voi cau hinh mac dinh"
 }
 
@@ -365,16 +370,17 @@ if (Test-Path $frontendEnv) {
     Copy-Item $frontendEnvExample $frontendEnv
     Write-OK "Tao frontend\.env tu .env.example"
 } else {
-    @"
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000
-VITE_APP_TITLE=Traffic Monitoring AI
-"@ | Out-File -FilePath $frontendEnv -Encoding UTF8
+    $frontendEnvContent = @(
+        "VITE_API_URL=http://localhost:8000"
+        "VITE_WS_URL=ws://localhost:8000"
+        "VITE_APP_TITLE=Traffic Monitoring AI"
+    )
+    $frontendEnvContent -join "`r`n" | Out-File -FilePath $frontendEnv -Encoding UTF8 -NoNewline
     Write-OK "Tao frontend\.env voi cau hinh mac dinh"
 }
 
 # ============================================================
-# BƯỚC 6: Kiểm tra file Model AI
+# BUOC 6: Kiem tra file Model AI
 # ============================================================
 
 Write-Step "Kiem tra file Model AI"
@@ -382,7 +388,7 @@ Write-Step "Kiem tra file Model AI"
 if ($SkipModel) {
     Write-Info "Bo qua (flag -SkipModel)"
 } else {
-    # Tạo thư mục models nếu chưa có
+    # Tao thu muc models neu chua co
     if (-not (Test-Path $ModelsDir)) {
         New-Item -ItemType Directory -Path $ModelsDir -Force | Out-Null
         Write-Info "Tao thu muc models/"
@@ -391,7 +397,7 @@ if ($SkipModel) {
     $modelFile = Join-Path $ModelsDir "vehicle_detection.pt"
     if (Test-Path $modelFile) {
         $modelSize = [math]::Round((Get-Item $modelFile).Length / 1MB, 1)
-        Write-OK "vehicle_detection.pt da co ($modelSize MB)"
+        Write-OK "vehicle_detection.pt da co ($($modelSize) MB)"
     } else {
         Write-Warn "Chua co file models/vehicle_detection.pt"
         Write-Info ""
@@ -404,7 +410,7 @@ if ($SkipModel) {
         Write-Info "                       (do chinh xac thap hon model custom)"
     }
 
-    # Tạo thư mục evidence và uploads
+    # Tao thu muc evidence va uploads
     $evidenceDir = Join-Path $BackendDir "evidence"
     $uploadsDir  = Join-Path $BackendDir "uploads"
 
@@ -418,16 +424,16 @@ if ($SkipModel) {
 }
 
 # ============================================================
-# KẾT QUẢ
+# KET QUA
 # ============================================================
 
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║            KET QUA CAI DAT                   ║" -ForegroundColor Cyan
-Write-Host "  ╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  ====================================================" -ForegroundColor Cyan
+Write-Host "              KET QUA CAI DAT" -ForegroundColor Cyan
+Write-Host "  ====================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Tổng kết
+# Tong ket
 $successItems = @(
     @{ Name = "Python venv";  OK = (Test-Path $venvPython) },
     @{ Name = "Pip packages"; OK = (Test-Path $venvPip) },
@@ -438,9 +444,9 @@ $successItems = @(
 
 foreach ($item in $successItems) {
     if ($item.OK) {
-        Write-Host "  [✓] $($item.Name)" -ForegroundColor Green
+        Write-Host "  [+] $($item.Name)" -ForegroundColor Green
     } else {
-        Write-Host "  [✗] $($item.Name)" -ForegroundColor Red
+        Write-Host "  [-] $($item.Name)" -ForegroundColor Red
     }
 }
 
@@ -462,7 +468,7 @@ if ($Errors.Count -gt 0) {
     }
 }
 
-# Hướng dẫn tiếp theo
+# Huong dan tiep theo
 Write-Host ""
 Write-Host ("-" * 50) -ForegroundColor DarkGray
 
@@ -475,8 +481,8 @@ if ($Errors.Count -eq 0) {
     Write-Host "       .\start_all.ps1" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Hoac chay thu cong:" -ForegroundColor White
-    Write-Host "    Terminal 1:  cd backend && .venv\Scripts\activate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload" -ForegroundColor DarkGray
-    Write-Host "    Terminal 2:  cd frontend && npm run dev" -ForegroundColor DarkGray
+    Write-Host "    Terminal 1: cd backend ; .venv\Scripts\activate ; uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload" -ForegroundColor DarkGray
+    Write-Host "    Terminal 2: cd frontend ; npm run dev" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  Truy cap:" -ForegroundColor White
     Write-Host "    Dashboard : http://localhost:5173" -ForegroundColor Yellow
