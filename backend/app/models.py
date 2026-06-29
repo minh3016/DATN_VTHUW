@@ -1,6 +1,6 @@
 """
 models.py - Pydantic schemas cho request/response
-Vehicle Classification System – YOLOv7
+Traffic Violation Detection System v4.0 – YOLOv8n
 """
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -38,34 +38,66 @@ class BoundingBox(BaseModel):
 
 
 class VehicleDetection(BaseModel):
+    """Kết quả phát hiện phương tiện giao thông"""
     bbox: BoundingBox
     class_id: int
-    class_name: str       # "car", "truck", "bus", "motorcycle", "bicycle"
-    category: str = ""    # "oto" | "xe_may" | "xe_dap"
+    class_name: str       # "car", "truck", "bus", "motorcycle"
+    category: str = ""    # "oto" | "xe_may"
 
+
+class ViolationDetection(BaseModel):
+    """Kết quả phát hiện vi phạm giao thông"""
+    bbox: BoundingBox
+    class_id: int
+    violation_type: str      # "no_seatbelt" | "using_phone" | "no_helmet"
+    violation_label: str     # "Không thắt dây an toàn" | "Sử dụng điện thoại" | "Không đội MBH"
+    is_violation: bool = True  # True = vi phạm, False = hợp lệ
+
+
+class PlateDetection(BaseModel):
+    """Kết quả phát hiện và nhận diện biển số xe"""
+    bbox: BoundingBox
+    plate_text: str = ""                   # Biển số đã nhận diện (e.g. "51A12345")
+    char_confidences: List[float] = []     # Confidence của từng ký tự OCR
+    avg_ocr_confidence: float = 0.0        # Confidence trung bình OCR
+    plate_image_base64: Optional[str] = None  # Ảnh crop biển số (base64)
+
+
+# ---------------------------------------------------------------------------
+# Extended Frame Analysis Result
+# ---------------------------------------------------------------------------
 
 class FrameAnalysisResult(BaseModel):
     frame_id: int
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Vehicles
     vehicles: List[VehicleDetection] = []
     vehicle_count: int = 0
     counts_by_class: Dict[str, int] = {}      # {"car": 3, "truck": 1, ...}
-    counts_by_category: Dict[str, int] = {}   # {"oto": 4, "xe_may": 2, "xe_dap": 1}
+    counts_by_category: Dict[str, int] = {}   # {"oto": 4, "xe_may": 2}
+    # Violations
+    violations: List[ViolationDetection] = []
+    violation_count: int = 0
+    counts_by_violation: Dict[str, int] = {}  # {"no_helmet": 2, "no_seatbelt": 1}
+    # Plates
+    plates: List[PlateDetection] = []
+    plate_count: int = 0
+    # Meta
     fps: float = 0.0
     frame_base64: Optional[str] = None  # annotated frame
 
 
 # ---------------------------------------------------------------------------
-# Detection record (replaces violations)
+# Detection record (for DB persistence – vehicles)
 # ---------------------------------------------------------------------------
 
 class DetectionCreate(BaseModel):
     """Lưu lịch sử phát hiện xe"""
-    vehicle_class: str           # "car" | "truck" | "bus" | "motorcycle" | "bicycle"
-    category: str                # "oto" | "xe_may" | "xe_dap"
+    vehicle_class: str           # "car" | "truck" | "bus" | "motorcycle"
+    category: str                # "oto" | "xe_may"
     confidence: float = 0.0
     camera_id: str = "CAM_01"
-    source_type: str = "stream"  # "stream" | "upload"
+    source_type: str = "stream"  # "stream" | "upload" | "image"
     source_file: Optional[str] = None
     evidence_path: Optional[str] = None
 
@@ -79,11 +111,36 @@ class DetectionResponse(DetectionCreate):
 
 
 # ---------------------------------------------------------------------------
+# Violation record (for DB persistence – vi phạm)
+# ---------------------------------------------------------------------------
+
+class ViolationCreate(BaseModel):
+    """Lưu lịch sử vi phạm giao thông"""
+    violation_type: str           # "no_helmet" | "no_seatbelt" | "using_phone"
+    violation_label: str          # Label tiếng Việt
+    confidence: float = 0.0
+    plate_text: Optional[str] = None    # Biển số (nếu nhận diện được)
+    vehicle_class: Optional[str] = None # Loại xe liên quan
+    camera_id: str = "CAM_01"
+    source_type: str = "stream"  # "stream" | "upload" | "image"
+    source_file: Optional[str] = None
+    evidence_path: Optional[str] = None
+
+
+class ViolationResponse(ViolationCreate):
+    id: str
+    created_at: datetime
+
+    class Config:
+        populate_by_name = True
+
+
+# ---------------------------------------------------------------------------
 # WebSocket message schemas
 # ---------------------------------------------------------------------------
 
 class WSMessage(BaseModel):
-    type: str  # "frame_result" | "detection" | "stats" | "error" | "pong"
+    type: str  # "frame_result" | "detection" | "violation" | "stats" | "error" | "pong"
     data: dict = {}
 
 
@@ -134,6 +191,9 @@ class AnalysisJobStatus(BaseModel):
     total_frames: int = 0
     processed_frames: int = 0
     vehicles_detected: int = 0
+    violations_detected: int = 0
+    plates_detected: int = 0
     counts_by_class: Dict[str, int] = {}
     counts_by_category: Dict[str, int] = {}
+    counts_by_violation: Dict[str, int] = {}
     error_message: Optional[str] = None

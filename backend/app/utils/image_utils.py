@@ -106,31 +106,45 @@ def crop_region(
 
 def add_overlay_info(
     img: np.ndarray,
-    vehicle_count: int,
-    no_helmet_count: int = 0,
+    vehicle_count: int = 0,
+    violation_count: int = 0,
+    plate_count: int = 0,
     fps: float = 0.0,
     camera_id: str = "CAM_01",
 ) -> np.ndarray:
     """Thêm thông tin overlay lên góc trên ảnh (ASCII-safe cho cv2.putText)"""
     overlay = img.copy()
     h, w = img.shape[:2]
-    # Nền mờ
-    cv2.rectangle(overlay, (0, 0), (280, 80), (0, 0, 0), -1)
-    img = cv2.addWeighted(overlay, 0.5, img, 0.5, 0)
 
     lines = [
         f"Camera: {camera_id}",
         f"Vehicles: {vehicle_count}",
+        f"Violations: {violation_count}",
+        f"Plates: {plate_count}",
         f"FPS: {fps:.1f}",
     ]
+
+    # Nền mờ (tự động co giãn theo số dòng)
+    overlay_h = 18 + len(lines) * 22
+    cv2.rectangle(overlay, (0, 0), (300, overlay_h), (0, 0, 0), -1)
+    img = cv2.addWeighted(overlay, 0.5, img, 0.5, 0)
+
     for i, line in enumerate(lines):
+        # Violations hiển thị màu đỏ nếu > 0
+        if "Violations" in line and violation_count > 0:
+            color = (0, 0, 255)  # Red
+        elif "Violations" in line:
+            color = (0, 200, 0)  # Green
+        else:
+            color = (0, 255, 200)  # Cyan-green
+
         cv2.putText(
             img,
             line,
             (10, 22 + i * 22),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 200),
+            0.55,
+            color,
             2,
             cv2.LINE_AA,
         )

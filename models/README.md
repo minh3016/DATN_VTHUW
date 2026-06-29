@@ -1,28 +1,35 @@
 # models/
 
-Thư mục này chứa các file model đã huấn luyện (.pt):
+Thư mục chứa các model YOLOv8n đã huấn luyện (.pt) cho hệ thống phát hiện vi phạm giao thông.
 
-| File | Mô tả | Tạo bằng |
-|------|--------|----------|
-| `vehicle_detection.pt` | Phát hiện phương tiện (car, motorbike, truck, bus, bicycle) | `python training/train_vehicle.py` |
-| `helmet_detection.pt` | Phát hiện mũ bảo hiểm (helmet / no_helmet) | `python training/train_helmet.py` |
-| `license_plate_detection.pt` | Phát hiện vùng biển số xe | Script train tương tự |
+## Danh sách model
 
-## Nếu chưa có model riêng
+| File | Mô tả | Dataset | Classes |
+|------|--------|---------|---------|
+| `vehicle_detection.pt` | Phát hiện & phân loại phương tiện | `data_detection_vehicle.yaml` | 4: car, motorcycle, truck, bus |
+| `traffic_violation.pt` | Phát hiện vi phạm giao thông | `data_traffic_violation.yaml` | 6: No Seatbelt, Seatbelt, Using mobile phone, With Helmet, Without Helmet, undefined |
+| `license_plate.pt` | Phát hiện vị trí biển số xe | `data_license_plate.yaml` | 1: license_plate |
+| `license_ocr.pt` | Nhận diện ký tự trên biển số | `data_license_ocr.yaml` | 36: 0-9, A-Z |
 
-Hệ thống sẽ tự động tải **YOLOv8n pretrained** từ Ultralytics khi khởi động.  
-Pretrained model hoạt động được nhưng độ chính xác thấp hơn custom model.
+## Thông tin training
 
-## Tải pretrained model thủ công
+- **Base model:** YOLOv8n (ultralytics pretrained)
+- **Framework:** Ultralytics YOLOv8
+- **Kích thước model:** ~6.2MB mỗi file
 
-```bash
-from ultralytics import YOLO
-# Tải và lưu
-model = YOLO('yolov8n.pt')
-model.save('models/vehicle_detection.pt')
-```
+## Vi phạm được phát hiện
 
-## Nguồn model cộng đồng
+Hệ thống phát hiện 3 loại vi phạm (từ `traffic_violation.pt`):
 
-- https://github.com/nicehorse06/license-plate-detector (biển số Việt Nam)
-- https://universe.roboflow.com (nhiều model sẵn có)
+1. **Không thắt dây an toàn** (No Seatbelt) – class 0
+2. **Sử dụng điện thoại** (Using mobile phone) – class 2
+3. **Không đội mũ bảo hiểm** (Without Helmet) – class 4
+
+> Classes 1, 3, 5 (Seatbelt, With Helmet, undefined) là trạng thái hợp lệ/không xác định, hệ thống tự động bỏ qua.
+
+## Pipeline nhận diện biển số
+
+1. `license_plate.pt` → phát hiện bounding box vùng biển số
+2. `license_ocr.pt` → detect từng ký tự (36 classes: 0-9, A-Z) trên ảnh crop
+3. Sắp xếp ký tự theo vị trí (x, y) → ghép thành biển số hoàn chỉnh
+4. Hỗ trợ biển số 1 dòng và 2 dòng (biển số Việt Nam)

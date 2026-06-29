@@ -23,7 +23,7 @@
       />
 
       <template v-if="!selectedFile">
-        <div class="dropzone__icon">📹</div>
+        <div class="dropzone__icon">VIDEO</div>
         <div class="dropzone__title">Kéo thả video vào đây</div>
         <div class="dropzone__sub">hoặc click để chọn file</div>
         <div class="dropzone__formats">MP4, AVI, MOV, MKV • Tối đa 10 phút • 500MB</div>
@@ -31,7 +31,7 @@
 
       <template v-else>
         <div class="file-preview">
-          <div class="file-preview__icon">🎬</div>
+          <div class="file-preview__icon">FILM</div>
           <div class="file-preview__info">
             <span class="file-preview__name">{{ selectedFile.name }}</span>
             <span class="file-preview__meta">
@@ -53,16 +53,16 @@
     <!-- Upload button -->
     <div v-if="selectedFile && !isUploading" class="upload-actions">
       <div v-if="videoDuration" class="upload-estimate">
-        ⏱ Ước tính xử lý: ~{{ estimatedProcessTime }}
+        Uoc tinh xu ly: ~{{ estimatedProcessTime }}
       </div>
       <button class="btn-upload" @click="handleUpload" :disabled="isUploading">
-        🚀 Upload & Phân tích
+        Upload & Phan tich
       </button>
     </div>
 
     <!-- Error message -->
     <div v-if="errorMessage" class="upload-error">
-      ⚠️ {{ errorMessage }}
+      Loi: {{ errorMessage }}
     </div>
   </div>
 </template>

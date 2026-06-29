@@ -1,0 +1,17 @@
+# Đường dẫn tuyệt đối đến thư mục chứa dataset
+path: M:/train_yolo/train_van_thu/Vietnamese-vehicle-1
+
+# Đường dẫn tương đối đến thư mục ảnh
+train: train/images 
+val: valid/images
+test: test/images
+
+# Số class
+nc: 4
+
+# Tên class (bạn cần xác định chính xác tên)
+names:
+  0: car
+  1: motorcycle
+  2: truck
+  3: bus

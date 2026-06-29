@@ -3,10 +3,10 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar__logo">
-        <div class="logo-icon">🚗</div>
+        <div class="logo-icon">🚦</div>
         <div class="logo-text">
-          <span class="logo-title">VehicleAI</span>
-          <span class="logo-sub">Classification System</span>
+          <span class="logo-title">TrafficAI</span>
+          <span class="logo-sub">Violation Detection</span>
         </div>
       </div>
 
@@ -16,12 +16,16 @@
           <span>Dashboard</span>
         </router-link>
         <router-link to="/upload" class="nav-item" active-class="nav-item--active">
-          <span class="nav-icon">📁</span>
+          <span class="nav-icon">📤</span>
           <span>Upload & Phân tích</span>
         </router-link>
+        <router-link to="/violations" class="nav-item" active-class="nav-item--active">
+          <span class="nav-icon">⚠️</span>
+          <span>Vi phạm</span>
+        </router-link>
         <router-link to="/history" class="nav-item" active-class="nav-item--active">
-          <span class="nav-icon">📋</span>
-          <span>Lịch sử</span>
+          <span class="nav-icon">🚗</span>
+          <span>Phương tiện</span>
         </router-link>
       </nav>
 
@@ -32,9 +36,19 @@
           <span class="status-val">{{ backendOnline ? 'Online' : 'Offline' }}</span>
         </div>
         <div class="status-item">
-          <span class="status-dot" :class="modelLoaded ? 'status-dot--online' : 'status-dot--offline'"></span>
-          <span>YOLOv7</span>
-          <span class="status-val">{{ modelLoaded ? 'Loaded' : 'N/A' }}</span>
+          <span class="status-dot" :class="modelsStatus.vehicle ? 'status-dot--online' : 'status-dot--offline'"></span>
+          <span>Vehicle AI</span>
+          <span class="status-val">{{ modelsStatus.vehicle ? '✓' : '✗' }}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" :class="modelsStatus.violation ? 'status-dot--online' : 'status-dot--offline'"></span>
+          <span>Violation AI</span>
+          <span class="status-val">{{ modelsStatus.violation ? '✓' : '✗' }}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" :class="modelsStatus.plate ? 'status-dot--online' : 'status-dot--offline'"></span>
+          <span>Plate AI</span>
+          <span class="status-val">{{ modelsStatus.plate ? '✓' : '✗' }}</span>
         </div>
       </div>
     </aside>
@@ -51,20 +65,28 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { getHealth } from '@/api/index.js'
 
 const backendOnline = ref(false)
-const modelLoaded = ref(false)
+const modelsStatus = reactive({
+  vehicle: false,
+  violation: false,
+  plate: false,
+})
 
 async function checkHealth() {
   try {
     const data = await getHealth()
     backendOnline.value = data.status === 'ok'
-    modelLoaded.value = data.models?.vehicle_detector === true
+    modelsStatus.vehicle = data.models?.vehicle_detector === true
+    modelsStatus.violation = data.models?.violation_detector === true
+    modelsStatus.plate = data.models?.plate_recognizer === true
   } catch {
     backendOnline.value = false
-    modelLoaded.value = false
+    modelsStatus.vehicle = false
+    modelsStatus.violation = false
+    modelsStatus.plate = false
   }
 }
 
@@ -113,7 +135,7 @@ onUnmounted(() => clearInterval(healthTimer))
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   box-shadow: var(--shadow-glow);
 }
 

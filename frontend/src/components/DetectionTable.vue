@@ -2,15 +2,15 @@
   <div class="dtable card">
     <!-- Header -->
     <div class="dtable-header">
-      <h3>📋 Lịch sử phát hiện</h3>
+      <h3>Lich su phat hien</h3>
       <div class="dtable-controls">
         <select v-model="filterClass" class="input input--sm" @change="loadData">
           <option value="">Tất cả loại xe</option>
-          <option value="car">🚙 Xe con</option>
-          <option value="truck">🚛 Xe tải</option>
-          <option value="bus">🚌 Xe buýt</option>
-          <option value="motorcycle">🏍️ Xe máy</option>
-          <option value="bicycle">🚲 Xe đạp</option>
+          <option value="car">Xe con</option>
+          <option value="truck">Xe tai</option>
+          <option value="bus">Xe buyt</option>
+          <option value="motorcycle">Xe may</option>
+          <option value="bicycle">Xe dap</option>
         </select>
         <select v-model="filterCategory" class="input input--sm" @change="loadData">
           <option value="">Tất cả nhóm</option>
@@ -18,7 +18,7 @@
           <option value="xe_may">Xe máy</option>
           <option value="xe_dap">Xe đạp</option>
         </select>
-        <button class="btn btn--ghost btn--sm" @click="loadData" title="Tải lại">🔄</button>
+        <button class="btn btn--ghost btn--sm" @click="loadData" title="Tai lai">Reload</button>
       </div>
     </div>
 
@@ -126,12 +126,12 @@ const modalSrc       = ref(null)
 // ── Labels ─────────────────────────────────────────────────────
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe buýt', motorcycle: 'Xe máy', bicycle: 'Xe đạp' }
 const CLASS_BADGES = { car: 'badge--success', truck: 'badge--warning', bus: 'badge--info', motorcycle: 'badge--danger', bicycle: 'badge--primary' }
-const CLASS_ICONS  = { car: '🚙', truck: '🚛', bus: '🚌', motorcycle: '🏍️', bicycle: '🚲' }
+const CLASS_ICONS  = { car: 'Car', truck: 'Truck', bus: 'Bus', motorcycle: 'Moto', bicycle: 'Bike' }
 const CAT_LABELS   = { oto: 'Xe ô tô', xe_may: 'Xe máy', xe_dap: 'Xe đạp' }
 
 function classLabel(c) { return CLASS_LABELS[c] || c }
 function classBadge(c) { return CLASS_BADGES[c] || 'badge--info' }
-function classIcon(c)  { return CLASS_ICONS[c] || '🚗' }
+function classIcon(c)  { return CLASS_ICONS[c] || 'Car' }
 function categoryLabel(c) { return CAT_LABELS[c] || c }
 function getEvUrl(p) { return getEvidenceUrl(p) }
 

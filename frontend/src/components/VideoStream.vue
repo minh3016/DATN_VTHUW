@@ -16,9 +16,9 @@
     <!-- Controls: URL input + Test + Start/Stop -->
     <div class="stream-controls">
       <select v-model="sourceType" class="input source-select" :disabled="isStreaming">
-        <option value="esp32">📡 ESP32 MJPEG</option>
-        <option value="file">📂 Video file</option>
-        <option value="webcam">🎥 Webcam</option>
+        <option value="esp32">ESP32 MJPEG</option>
+        <option value="file">Video file</option>
+        <option value="webcam">Webcam</option>
       </select>
 
       <!-- ESP32 MJPEG URL -->
@@ -37,7 +37,7 @@
           title="Test kết nối ESP32"
         >
           <span v-if="testing" class="spinner"></span>
-          <span v-else>🔌</span>
+          <span v-else>Test</span>
         </button>
       </div>
 
@@ -61,13 +61,13 @@
         id="stream-toggle-btn"
       >
         <span v-if="connecting" class="spinner"></span>
-        <span v-else>{{ isStreaming ? '⏹ Dừng' : '▶ Bắt đầu' }}</span>
+        <span v-else>{{ isStreaming ? 'Dung' : 'Bat dau' }}</span>
       </button>
     </div>
 
     <!-- Test connection result -->
     <div v-if="testResult" class="test-result" :class="testResult.ok ? 'test-ok' : 'test-fail'">
-      {{ testResult.ok ? '✅' : '❌' }} {{ testResult.message }}
+      {{ testResult.ok ? 'OK' : 'FAIL' }} {{ testResult.message }}
     </div>
 
     <!-- Reconnecting overlay -->
@@ -85,7 +85,7 @@
       />
       <div v-else class="stream-placeholder">
         <div class="placeholder-icon">
-          {{ sourceType === 'esp32' ? '📡' : '📷' }}
+          {{ sourceType === 'esp32' ? 'ESP' : 'CAM' }}
         </div>
         <p v-if="!isStreaming">
           {{ sourceType === 'esp32' ? 'Nhập URL ESP32 và nhấn Bắt đầu' : 'Nhấn Bắt đầu để xem camera' }}
@@ -112,7 +112,7 @@
 
     <!-- Vehicle counts bar -->
     <div v-if="frameData?.counts_by_class && Object.keys(frameData.counts_by_class).length" class="counts-bar">
-      <span class="counts-label">🚗 Phân loại:</span>
+      <span class="counts-label">Phan loai:</span>
       <span v-for="(cnt, cls) in frameData.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)">
         {{ classIcon(cls) }} {{ classLabel(cls) }}: {{ cnt }}
       </span>
@@ -132,12 +132,12 @@ const emit = defineEmits(['frame-result', 'stream-change'])
 // ── Labels ──────────────────────────────────────────────────────
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe buýt', motorcycle: 'Xe máy', bicycle: 'Xe đạp' }
 const CLASS_BADGES = { car: 'badge--success', truck: 'badge--warning', bus: 'badge--info', motorcycle: 'badge--danger', bicycle: 'badge--primary' }
-const CLASS_ICONS  = { car: '🚙', truck: '🚛', bus: '🚌', motorcycle: '🏍️', bicycle: '🚲' }
+const CLASS_ICONS  = { car: 'Car', truck: 'Truck', bus: 'Bus', motorcycle: 'Moto', bicycle: 'Bike' }
 const CAT_LABELS   = { oto: 'Ô tô', xe_may: 'Xe máy', xe_dap: 'Xe đạp' }
 
 function classLabel(c) { return CLASS_LABELS[c] || c }
 function classBadge(c) { return CLASS_BADGES[c] || 'badge--info' }
-function classIcon(c) { return CLASS_ICONS[c] || '🚗' }
+function classIcon(c) { return CLASS_ICONS[c] || 'Car' }
 function catLabel(c) { return CAT_LABELS[c] || c }
 
 // ── State ──────────────────────────────────────────────────────

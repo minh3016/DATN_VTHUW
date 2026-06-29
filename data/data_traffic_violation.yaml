@@ -1,0 +1,17 @@
+names:
+- No Seatbelt
+- Seatbelt
+- Using mobile phone
+- With Helmet
+- Without Helmet
+- undefined
+nc: 6
+roboflow:
+  license: CC BY 4.0
+  project: trafficviolationmerged
+  url: https://universe.roboflow.com/fyp-6uenr/trafficviolationmerged/dataset/1
+  version: 1
+  workspace: fyp-6uenr
+test: ../test/images
+train: ../train/images
+val: ../valid/images

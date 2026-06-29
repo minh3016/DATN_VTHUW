@@ -1,8 +1,8 @@
 <template>
   <div class="upload-page">
     <header class="page-header">
-      <h1>📁 <span class="text-gradient">Upload & Phân tích</span></h1>
-      <p>Tải lên ảnh hoặc video để phân loại phương tiện bằng AI YOLOv7</p>
+      <h1><span class="text-gradient">Upload & Phan tich</span></h1>
+      <p>Tải lên ảnh hoặc video để phát hiện vi phạm giao thông bằng AI YOLOv8n</p>
     </header>
 
     <!-- Mode selector -->
@@ -10,11 +10,11 @@
       <button
         class="mode-tab" :class="{ 'mode-tab--active': mode === 'image' }"
         @click="resetAll(); mode = 'image'"
-      >🖼️ Phân tích Ảnh</button>
+      >Phan tich Anh</button>
       <button
         class="mode-tab" :class="{ 'mode-tab--active': mode === 'video' }"
         @click="resetAll(); mode = 'video'"
-      >🎬 Phân tích Video</button>
+      >Phan tich Video</button>
     </div>
 
     <!-- ============ IMAGE MODE ============ -->
@@ -45,13 +45,13 @@
           </div>
           <button class="btn btn--primary" @click.stop="analyzeCurrentImage" :disabled="imageLoading">
             <span v-if="imageLoading" class="spinner"></span>
-            <span v-else>🔍 Phân tích</span>
+            <span v-else>Phan tich</span>
           </button>
         </div>
 
         <!-- Empty state -->
         <div v-else class="drop-content">
-          <div class="drop-icon">🖼️</div>
+          <div class="drop-icon">IMG</div>
           <p class="drop-title">Kéo thả ảnh vào đây</p>
           <p class="drop-sub">hoặc nhấn để chọn file · JPG, PNG, BMP, WebP · Tối đa 20MB</p>
         </div>
@@ -60,14 +60,14 @@
       <!-- Upload progress -->
       <div v-if="imageLoading" class="loading-card">
         <span class="spinner spinner--lg"></span>
-        <p>Đang phân tích ảnh bằng YOLOv7...</p>
+        <p>Đang phân tích ảnh bằng AI (4 models)...</p>
       </div>
 
       <!-- Image Result -->
       <div v-if="imageResult" class="result-section animate-fade-in">
         <div class="result-header">
-          <h2>📊 Kết quả phân tích</h2>
-          <button class="btn btn--ghost" @click="resetAll">📁 Upload ảnh mới</button>
+          <h2>Ket qua phan tich</h2>
+          <button class="btn btn--ghost" @click="resetAll">Upload anh moi</button>
         </div>
 
         <!-- Annotated image -->
@@ -85,7 +85,17 @@
           <div class="rs-card rs-card--blue">
             <span class="rs-icon">🚗</span>
             <span class="rs-val">{{ imageResult.vehicle_count || 0 }}</span>
-            <span class="rs-label">Tổng phương tiện</span>
+            <span class="rs-label">Phương tiện</span>
+          </div>
+          <div class="rs-card rs-card--red">
+            <span class="rs-icon">⚠️</span>
+            <span class="rs-val">{{ imageResult.violation_count || 0 }}</span>
+            <span class="rs-label">Vi phạm</span>
+          </div>
+          <div class="rs-card rs-card--yellow">
+            <span class="rs-icon">🔢</span>
+            <span class="rs-val">{{ imageResult.plate_count || 0 }}</span>
+            <span class="rs-label">Biển số</span>
           </div>
           <div
             v-for="(cnt, cls) in (imageResult.counts_by_class || {})" :key="cls"
@@ -108,15 +118,40 @@
           </div>
         </div>
 
-        <!-- Detection list -->
+        <!-- Vehicle detection list -->
         <div v-if="imageResult.vehicles?.length" class="detections-list">
-          <h3>🔍 Chi tiết phát hiện</h3>
+          <h3>🚗 Phuong tien phat hien</h3>
           <div class="det-grid">
             <div v-for="(v, i) in imageResult.vehicles" :key="i" class="det-item" :class="`det-item--${v.category}`">
               <span class="det-idx">{{ i + 1 }}</span>
               <span class="badge" :class="classBadge(v.class_name)">{{ classIcon(v.class_name) }} {{ classLabel(v.class_name) }}</span>
               <span class="det-conf mono">{{ (v.bbox.conf * 100).toFixed(0) }}%</span>
               <span class="det-cat">{{ catLabel(v.category) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Violations list -->
+        <div v-if="imageResult.violations?.length" class="detections-list violations-list">
+          <h3>⚠️ Vi pham giao thong</h3>
+          <div class="det-grid">
+            <div v-for="(viol, i) in imageResult.violations" :key="'v'+i" class="det-item det-item--violation">
+              <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
+              <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
+              <span class="det-conf mono">{{ (viol.bbox.conf * 100).toFixed(0) }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Plates list -->
+        <div v-if="imageResult.plates?.length" class="detections-list plates-list">
+          <h3>🔢 Bien so xe nhan dien</h3>
+          <div class="det-grid">
+            <div v-for="(plate, i) in imageResult.plates" :key="'p'+i" class="det-item det-item--plate">
+              <span class="det-idx det-idx--plate">{{ i + 1 }}</span>
+              <span class="plate-text-lg">{{ plate.plate_text || 'Không nhận diện được' }}</span>
+              <span class="det-conf mono">{{ plate.avg_ocr_confidence ? (plate.avg_ocr_confidence * 100).toFixed(0) + '%' : '—' }}</span>
+              <img v-if="plate.plate_image_base64" :src="'data:image/jpeg;base64,' + plate.plate_image_base64" class="plate-thumb" alt="plate" />
             </div>
           </div>
         </div>
@@ -135,7 +170,7 @@
         <div class="job-card">
           <div class="job-card__header">
             <div class="job-info">
-              <h3>🎬 {{ currentJob.filename }}</h3>
+              <h3>{{ currentJob.filename }}</h3>
               <span class="job-meta">
                 {{ formatSize(currentJob.file_size) }}
                 <span v-if="currentJob.duration_sec"> · {{ formatDuration(currentJob.duration_sec) }}</span>
@@ -152,36 +187,42 @@
             </div>
             <div class="progress-text">
               <span>{{ jobStatus.processed_frames||0 }}/{{ jobStatus.total_frames||'?' }} frames ({{ Math.round((jobStatus.progress||0)*100) }}%)</span>
-              <span>🚗 {{ jobStatus.vehicles_detected||0 }} phương tiện</span>
+              <span>🚗 {{ jobStatus.vehicles_detected||0 }} · ⚠️ {{ jobStatus.violations_detected||0 }} · 🔢 {{ jobStatus.plates_detected||0 }}</span>
             </div>
           </div>
 
           <button v-if="!jobStatus || jobStatus.status === 'pending'" class="btn btn--primary" style="width:100%" @click="startVideoAnalysis" :disabled="isStarting">
-            {{ isStarting ? '⏳ Đang khởi tạo...' : '▶️ Bắt đầu phân tích' }}
+            {{ isStarting ? 'Dang khoi tao...' : 'Bat dau phan tich' }}
           </button>
         </div>
 
         <!-- Live preview -->
         <div v-if="latestFrame" class="preview-section">
-          <h3>🖥 Xem trước</h3>
+          <h3>Xem truoc</h3>
           <img :src="'data:image/jpeg;base64,' + latestFrame" alt="Preview" class="annotated-img" />
         </div>
 
         <!-- Video results -->
         <div v-if="jobStatus?.status === 'completed'" class="result-section animate-fade-in">
-          <h2>📊 Kết quả phân tích video</h2>
+          <h2>Ket qua phan tich video</h2>
           <div class="result-stats">
-            <div class="rs-card rs-card--blue"><span class="rs-icon">🚗</span><span class="rs-val">{{ jobStatus.vehicles_detected }}</span><span class="rs-label">Tổng</span></div>
-            <div class="rs-card rs-card--car"><span class="rs-icon">🚙</span><span class="rs-val">{{ jobStatus.counts_by_category?.oto||0 }}</span><span class="rs-label">Xe ô tô</span></div>
-            <div class="rs-card rs-card--motorcycle"><span class="rs-icon">🏍️</span><span class="rs-val">{{ jobStatus.counts_by_category?.xe_may||0 }}</span><span class="rs-label">Xe máy</span></div>
-            <div class="rs-card rs-card--bus"><span class="rs-icon">🚌</span><span class="rs-val">{{ jobStatus.counts_by_category?.xe_dap||0 }}</span><span class="rs-label">Xe buýt</span></div>
+            <div class="rs-card rs-card--blue"><span class="rs-icon">🚗</span><span class="rs-val">{{ jobStatus.vehicles_detected }}</span><span class="rs-label">Phuong tien</span></div>
+            <div class="rs-card rs-card--red"><span class="rs-icon">⚠️</span><span class="rs-val">{{ jobStatus.violations_detected || 0 }}</span><span class="rs-label">Vi pham</span></div>
+            <div class="rs-card rs-card--yellow"><span class="rs-icon">🔢</span><span class="rs-val">{{ jobStatus.plates_detected || 0 }}</span><span class="rs-label">Bien so</span></div>
+            <div class="rs-card rs-card--car"><span class="rs-icon">Oto</span><span class="rs-val">{{ jobStatus.counts_by_category?.oto||0 }}</span><span class="rs-label">Xe o to</span></div>
+            <div class="rs-card rs-card--motorcycle"><span class="rs-icon">Moto</span><span class="rs-val">{{ jobStatus.counts_by_category?.xe_may||0 }}</span><span class="rs-label">Xe may</span></div>
           </div>
-          <div v-if="jobStatus.counts_by_class" class="category-row" style="margin-top:12px">
+          <div v-if="jobStatus.counts_by_violation" class="category-row" style="margin-top:12px">
+            <span v-for="(cnt, vtype) in jobStatus.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype" style="padding:6px 14px;font-size:0.85rem">
+              {{ violLabel(vtype) }}: {{ cnt }}
+            </span>
+          </div>
+          <div v-if="jobStatus.counts_by_class" class="category-row" style="margin-top:8px">
             <span v-for="(cnt, cls) in jobStatus.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)" style="padding:6px 14px;font-size:0.85rem">
               {{ classIcon(cls) }} {{ classLabel(cls) }}: {{ cnt }}
             </span>
           </div>
-          <button class="btn btn--ghost" style="margin-top:16px" @click="resetAll">📁 Upload video mới</button>
+          <button class="btn btn--ghost" style="margin-top:16px" @click="resetAll">Upload video moi</button>
         </div>
       </div>
     </div>
@@ -194,14 +235,16 @@ import VideoUploader from '@/components/VideoUploader.vue'
 import { analyzeImage, startAnalysis, getAnalysisStatus, createWebSocket } from '@/api/index.js'
 
 // ── Labels ──────────────────────────────────────────────────────
-const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe buýt', motorcycle: 'Xe máy', bicycle: 'Xe đạp' }
-const CLASS_BADGES = { car: 'badge--success', truck: 'badge--warning', bus: 'badge--info', motorcycle: 'badge--danger', bicycle: 'badge--primary' }
-const CLASS_ICONS  = { car: '🚙', truck: '🚛', bus: '🚌', motorcycle: '🏍️', bicycle: '🚲' }
-const CAT_LABELS   = { oto: 'Xe ô tô', xe_may: 'Xe máy', xe_dap: 'Xe đạp' }
+const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
+const CLASS_BADGES = { car: 'badge--success', truck: 'badge--warning', bus: 'badge--info', motorcycle: 'badge--danger' }
+const CLASS_ICONS  = { car: '🚗', truck: '🚛', bus: '🚌', motorcycle: '🏍️' }
+const CAT_LABELS   = { oto: 'Xe ô tô', xe_may: 'Xe máy' }
+const VIOL_LABELS  = { no_helmet: 'Không đội MBH', no_seatbelt: 'Không thắt dây', using_phone: 'Dùng ĐT' }
 function classLabel(c) { return CLASS_LABELS[c] || c }
 function classBadge(c) { return CLASS_BADGES[c] || 'badge--info' }
 function classIcon(c) { return CLASS_ICONS[c] || '🚗' }
 function catLabel(c) { return CAT_LABELS[c] || c }
+function violLabel(v) { return VIOL_LABELS[v] || v }
 
 // ── State ──────────────────────────────────────────────────────
 const mode = ref('image')
@@ -289,7 +332,7 @@ async function pollStatus() {
   try {
     const s = await getAnalysisStatus(currentJob.value.job_id)
     jobStatus.value = s
-    const map = { pending:'Chờ xử lý', processing:'Đang phân tích...', completed:'Hoàn tất ✅', error:'Lỗi ❌' }
+    const map = { pending:'Cho xu ly', processing:'Dang phan tich...', completed:'Hoan tat', error:'Loi' }
     statusText.value = map[s.status] || s.status
     if (s.status === 'completed' || s.status === 'error') stopPolling()
   } catch {}
@@ -400,11 +443,12 @@ onUnmounted(() => { stopPolling(); if (ws) ws.close() })
 }
 .rs-card:hover { transform: translateY(-2px); }
 .rs-card--blue       { border-top: 3px solid #3b82f6; }
+.rs-card--red        { border-top: 3px solid #ef4444; }
+.rs-card--yellow     { border-top: 3px solid #f59e0b; }
 .rs-card--car        { border-top: 3px solid #22c55e; }
 .rs-card--truck      { border-top: 3px solid #f59e0b; }
 .rs-card--bus        { border-top: 3px solid #06b6d4; }
 .rs-card--motorcycle { border-top: 3px solid #ef4444; }
-.rs-card--bicycle    { border-top: 3px solid #8b5cf6; }
 .rs-icon  { font-size: 1.5rem; }
 .rs-val   { font-size: 1.8rem; font-weight: 800; color: var(--text-primary); }
 .rs-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
@@ -459,4 +503,31 @@ onUnmounted(() => { stopPolling(); if (ws) ws.close() })
 
 .preview-section { margin-bottom: 20px; }
 .preview-section h3 { font-size: 1rem; margin: 0 0 12px; }
+
+/* Violation items */
+.violations-list { border-left: 3px solid #ef4444; }
+.det-item--violation { border-left: 3px solid #ef4444; }
+.det-idx--danger { background: rgba(239,68,68,0.15); color: #ef4444; }
+.badge--violation {
+  padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+}
+.viol--no_helmet { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.viol--no_seatbelt { background: rgba(239,68,68,0.15); color: #ef4444; }
+.viol--using_phone { background: rgba(168,85,247,0.15); color: #a855f7; }
+
+/* Plate items */
+.plates-list { border-left: 3px solid #f59e0b; }
+.det-item--plate { border-left: 3px solid #f59e0b; }
+.det-idx--plate { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.plate-text-lg {
+  font-family: 'Courier New', monospace;
+  font-weight: 700; font-size: 1rem;
+  background: rgba(59,130,246,0.1);
+  padding: 4px 10px; border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+}
+.plate-thumb {
+  height: 36px; border-radius: 4px; margin-left: auto;
+  border: 1px solid var(--border-color);
+}
 </style>

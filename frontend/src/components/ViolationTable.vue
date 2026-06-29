@@ -1,7 +1,7 @@
 <template>
   <div class="violation-table card">
     <div class="table-header">
-      <h3>🚨 Vi phạm gần đây</h3>
+      <h3>Vi pham gan day</h3>
       <div class="table-actions">
         <input
           v-model="search"
@@ -11,7 +11,7 @@
         />
         <button class="btn btn--ghost btn--sm" @click="load" :disabled="loading">
           <span v-if="loading" class="spinner"></span>
-          <span v-else>🔄</span>
+          <span v-else>Reload</span>
         </button>
       </div>
     </div>
@@ -73,7 +73,7 @@
               <span v-else style="color:var(--text-muted);">—</span>
             </td>
             <td>
-              <button class="btn btn--ghost btn--sm" @click="remove(item._id)" title="Xóa">🗑️</button>
+              <button class="btn btn--ghost btn--sm" @click="remove(item._id)" title="Xoa">X</button>
             </td>
           </tr>
         </tbody>
@@ -190,10 +190,10 @@ function formatDate(iso) {
 
 function violationLabel(type) {
   const map = {
-    no_helmet: '🪖 Không MBH',
-    wrong_lane: '⚠️ Sai làn',
-    red_light: '🔴 Vượt đèn đỏ',
-    speeding: '⚡ Tốc độ cao',
+    no_helmet: 'Khong MBH',
+    wrong_lane: 'Sai lan',
+    red_light: 'Vuot den do',
+    speeding: 'Toc do cao',
   }
   return map[type] || type
 }

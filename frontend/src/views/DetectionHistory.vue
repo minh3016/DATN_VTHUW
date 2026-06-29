@@ -2,35 +2,35 @@
   <div class="history-page">
     <!-- Header -->
     <div class="page-header">
-      <h1>📋 <span class="text-gradient">Lịch sử Phát hiện</span></h1>
+      <h1><span class="text-gradient">Lich su Phat hien</span></h1>
       <p>Tra cứu lịch sử phát hiện phương tiện từ camera và video upload</p>
     </div>
 
     <!-- Stats chips -->
     <div class="stats-row">
       <div class="stat-chip stat-chip--blue">
-        <span class="stat-icon">🚗</span>
+        <span class="stat-icon">Car</span>
         <div>
           <div class="stat-val">{{ stats.total_detections || 0 }}</div>
           <div class="stat-label">Tổng (24h)</div>
         </div>
       </div>
       <div class="stat-chip stat-chip--green">
-        <span class="stat-icon">🚙</span>
+        <span class="stat-icon">Oto</span>
         <div>
           <div class="stat-val">{{ stats.by_category?.oto || 0 }}</div>
           <div class="stat-label">Xe ô tô</div>
         </div>
       </div>
       <div class="stat-chip stat-chip--red">
-        <span class="stat-icon">🏍️</span>
+        <span class="stat-icon">Moto</span>
         <div>
           <div class="stat-val">{{ stats.by_category?.xe_may || 0 }}</div>
           <div class="stat-label">Xe máy</div>
         </div>
       </div>
       <div class="stat-chip stat-chip--purple">
-        <span class="stat-icon">🚲</span>
+        <span class="stat-icon">Bike</span>
         <div>
           <div class="stat-val">{{ stats.by_category?.xe_dap || 0 }}</div>
           <div class="stat-label">Xe đạp</div>

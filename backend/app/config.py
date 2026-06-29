@@ -1,6 +1,6 @@
 """
 config.py - Cấu hình ứng dụng
-Vehicle Classification System – YOLOv7
+Traffic Violation Detection System v4.0 – YOLOv8n
 """
 import os
 from pathlib import Path
@@ -13,18 +13,43 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # MongoDB
 MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB: str = os.getenv("MONGO_DB", "vehicle_classification")
+MONGO_DB: str = os.getenv("MONGO_DB", "traffic_violation_detection")
 
 # ── Model paths ───────────────────────────────────────────────
 MODELS_DIR: Path = BASE_DIR / "models"
 
-# Vehicle Classification (YOLOv7 – custom trained)
+# Vehicle Detection (YOLOv8n – custom trained, 4 classes: car, motorcycle, truck, bus)
 VEHICLE_MODEL_PATH: str = os.getenv(
     "VEHICLE_MODEL_PATH", str(MODELS_DIR / "vehicle_detection.pt")
 )
 
+# Traffic Violation Detection (YOLOv8n – custom trained, 6 classes)
+# Vi phạm: No Seatbelt, Using mobile phone, Without Helmet
+# Hợp lệ: Seatbelt, With Helmet, undefined
+VIOLATION_MODEL_PATH: str = os.getenv(
+    "VIOLATION_MODEL_PATH", str(MODELS_DIR / "traffic_violation.pt")
+)
+
+# License Plate Detection (YOLOv8n – custom trained, 1 class: license_plate)
+PLATE_MODEL_PATH: str = os.getenv(
+    "PLATE_MODEL_PATH", str(MODELS_DIR / "license_plate.pt")
+)
+
+# License Plate OCR (YOLOv8n – custom trained, 36 classes: 0-9, A-Z)
+PLATE_OCR_MODEL_PATH: str = os.getenv(
+    "PLATE_OCR_MODEL_PATH", str(MODELS_DIR / "license_ocr.pt")
+)
+
 # ── Confidence thresholds ─────────────────────────────────────
 VEHICLE_CONF: float = float(os.getenv("VEHICLE_CONF", "0.25"))
+VIOLATION_CONF: float = float(os.getenv("VIOLATION_CONF", "0.35"))
+PLATE_CONF: float = float(os.getenv("PLATE_CONF", "0.30"))
+PLATE_OCR_CONF: float = float(os.getenv("PLATE_OCR_CONF", "0.25"))
+
+# ── Module toggles (bật/tắt từng module) ─────────────────────
+ENABLE_VEHICLE_DETECTION: bool = os.getenv("ENABLE_VEHICLE_DETECTION", "true").lower() == "true"
+ENABLE_VIOLATION_DETECTION: bool = os.getenv("ENABLE_VIOLATION_DETECTION", "true").lower() == "true"
+ENABLE_PLATE_RECOGNITION: bool = os.getenv("ENABLE_PLATE_RECOGNITION", "true").lower() == "true"
 
 # ── Frame processing ──────────────────────────────────────────
 FRAME_WIDTH: int = int(os.getenv("FRAME_WIDTH", "1280"))

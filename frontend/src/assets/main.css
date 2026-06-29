@@ -1,5 +1,5 @@
 /* ============================================================
-   main.css – Design System cho Vehicle Classification AI
+   main.css – Design System cho Traffic Violation Detection AI
    ============================================================ */
 
 /* ── Google Fonts đã load qua index.html ── */
@@ -24,12 +24,18 @@
   /* Vehicle category colors */
   --color-oto:      #22c55e;
   --color-xe-may:   #ef4444;
-  --color-xe-dap:   #8b5cf6;
   --color-car:      #22c55e;
   --color-truck:    #f59e0b;
   --color-bus:      #06b6d4;
   --color-motorcycle:#ef4444;
-  --color-bicycle:  #8b5cf6;
+
+  /* Violation severity colors */
+  --color-no-helmet:   #f59e0b;
+  --color-no-seatbelt: #ef4444;
+  --color-using-phone: #a855f7;
+
+  /* Background deeper (for table headers, filters) */
+  --bg-deeper:      #0d1424;
 
   /* Gradients */
   --gradient-primary:  linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);

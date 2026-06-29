@@ -3,13 +3,13 @@
     <!-- Header -->
     <div class="dfeed-header">
       <div class="dfeed-title">
-        <span class="dfeed-icon">🚗</span>
+        <span class="dfeed-icon">Car</span>
         <h3>Phát hiện Realtime</h3>
         <span v-if="items.length" class="count-badge">{{ items.length }}</span>
       </div>
       <div class="dfeed-actions">
         <span v-if="newCount > 0" class="new-badge animate-bounce">+{{ newCount }} mới</span>
-        <button class="btn btn--ghost btn--sm" @click="clearFeed" title="Xóa feed">🗑</button>
+        <button class="btn btn--ghost btn--sm" @click="clearFeed" title="Xoa feed">X</button>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
     <div class="dfeed-list" ref="listRef">
       <!-- Empty state -->
       <div v-if="!items.length" class="dfeed-empty">
-        <div class="empty-icon">🔍</div>
+        <div class="empty-icon">Search</div>
         <p>Chưa phát hiện phương tiện</p>
         <p class="empty-sub">Kết quả sẽ xuất hiện ở đây realtime</p>
       </div>
@@ -81,13 +81,13 @@ const CATEGORY_LABELS = {
   oto: 'Xe ô tô', xe_may: 'Xe máy', xe_dap: 'Xe đạp',
 }
 const CATEGORY_ICONS = {
-  oto: '🚗', xe_may: '🏍️', xe_dap: '🚲',
+  oto: 'Car', xe_may: 'Moto', xe_dap: 'Bike',
 }
 
 function classLabel(cls) { return CLASS_LABELS[cls] || cls }
 function classBadge(cls) { return CLASS_BADGES[cls] || 'badge--info' }
 function categoryLabel(cat) { return CATEGORY_LABELS[cat] || cat }
-function categoryIcon(cat) { return CATEGORY_ICONS[cat] || '🚗' }
+function categoryIcon(cat) { return CATEGORY_ICONS[cat] || 'Car' }
 
 // ── API ────────────────────────────────────────────────────────
 function addDetections(vehicles, timestamp) {

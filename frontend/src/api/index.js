@@ -1,6 +1,6 @@
 /**
  * api/index.js - API client
- * Vehicle Classification System - YOLOv7
+ * Traffic Violation Detection System v4.0
  */
 import axios from 'axios'
 
@@ -23,16 +23,26 @@ api.interceptors.response.use(
 // ── Health ────────────────────────────────────────────────────
 export const getHealth = () => api.get('/')
 
-// ── Detections ─────────────────────────────────────────────────
+// ── Detections (vehicles) ─────────────────────────────────────
 export const getDetections = (params = {}) =>
   api.get('/api/detections', { params })
 
 export const deleteDetection = (id) =>
   api.delete(`/api/detections/${id}`)
 
-// ── Stats ─────────────────────────────────────────────────────
+// ── Stats (vehicles) ─────────────────────────────────────────
 export const getStats = (hours = 24) =>
   api.get('/api/stats', { params: { hours } })
+
+// ── Violations ────────────────────────────────────────────────
+export const getViolations = (params = {}) =>
+  api.get('/api/violations', { params })
+
+export const deleteViolation = (id) =>
+  api.delete(`/api/violations/${id}`)
+
+export const getViolationStats = (hours = 24) =>
+  api.get('/api/violations/stats', { params: { hours } })
 
 // ── Analyze Image (upload ảnh) ────────────────────────────────
 export const analyzeImage = (file, onProgress = null) => {

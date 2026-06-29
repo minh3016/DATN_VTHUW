@@ -3,8 +3,8 @@
     <!-- Page header -->
     <div class="page-header">
       <div>
-        <h1>🚗 <span class="text-gradient">Phân loại Xe cộ</span></h1>
-        <p class="page-sub">Vehicle Classification System · YOLOv7 · Phân tích ảnh & video</p>
+        <h1><span class="text-gradient">Phat hien Vi pham Giao thong</span></h1>
+        <p class="page-sub">Traffic Violation Detection · YOLOv8n AI · 4 Models</p>
       </div>
       <div class="header-badges">
         <span class="badge badge--success" v-if="backendOk">AI Online</span>
@@ -17,74 +17,76 @@
       <div class="kpi-card kpi-card--blue animate-fade-in" style="animation-delay:0ms">
         <div class="kpi-icon">🚗</div>
         <div class="kpi-body">
-          <div class="kpi-value">{{ stats.total_detections || 0 }}</div>
+          <div class="kpi-value">{{ vehicleStats.total_detections || 0 }}</div>
           <div class="kpi-label">Tổng phương tiện</div>
         </div>
         <div class="kpi-trend">24h</div>
       </div>
-      <div class="kpi-card kpi-card--green animate-fade-in" style="animation-delay:80ms">
-        <div class="kpi-icon">🚙</div>
+      <div class="kpi-card kpi-card--red animate-fade-in" style="animation-delay:80ms">
+        <div class="kpi-icon">⚠️</div>
         <div class="kpi-body">
-          <div class="kpi-value">{{ stats.by_category?.oto || 0 }}</div>
+          <div class="kpi-value">{{ violStats.total_violations || 0 }}</div>
+          <div class="kpi-label">Tổng vi phạm</div>
+        </div>
+        <div class="kpi-trend">24h</div>
+      </div>
+      <div class="kpi-card kpi-card--yellow animate-fade-in" style="animation-delay:160ms">
+        <div class="kpi-icon">🪖</div>
+        <div class="kpi-body">
+          <div class="kpi-value">{{ violStats.by_type?.no_helmet || 0 }}</div>
+          <div class="kpi-label">Không đội MBH</div>
+        </div>
+        <div class="kpi-trend kpi-trend--sub">
+          Dây: {{ violStats.by_type?.no_seatbelt || 0 }} · ĐT: {{ violStats.by_type?.using_phone || 0 }}
+        </div>
+      </div>
+      <div class="kpi-card kpi-card--green animate-fade-in" style="animation-delay:240ms">
+        <div class="kpi-icon">🔢</div>
+        <div class="kpi-body">
+          <div class="kpi-value">{{ vehicleStats.by_category?.oto || 0 }}</div>
           <div class="kpi-label">Xe ô tô</div>
         </div>
         <div class="kpi-trend kpi-trend--sub">
-          🚛 {{ stats.by_class?.truck || 0 }} · 🚌 {{ stats.by_class?.bus || 0 }}
+          Xe máy: {{ vehicleStats.by_category?.xe_may || 0 }}
         </div>
-      </div>
-      <div class="kpi-card kpi-card--red animate-fade-in" style="animation-delay:160ms">
-        <div class="kpi-icon">🏍️</div>
-        <div class="kpi-body">
-          <div class="kpi-value">{{ stats.by_category?.xe_may || 0 }}</div>
-          <div class="kpi-label">Xe máy</div>
-        </div>
-        <div class="kpi-trend">24h</div>
-      </div>
-      <div class="kpi-card kpi-card--purple animate-fade-in" style="animation-delay:240ms">
-        <div class="kpi-icon">🚌</div>
-        <div class="kpi-body">
-          <div class="kpi-value">{{ stats.by_class?.bus || 0 }}</div>
-          <div class="kpi-label">Xe buýt</div>
-        </div>
-        <div class="kpi-trend">24h</div>
       </div>
     </div>
 
     <!-- Charts row -->
     <div class="charts-row">
-      <!-- Doughnut -->
+      <!-- Vehicle Doughnut -->
       <div class="card chart-card">
-        <h3>📊 Phân bố loại xe (24h)</h3>
+        <h3>Phan bo loai xe (24h)</h3>
         <div class="chart-wrap">
-          <Doughnut v-if="chartData" :data="chartData" :options="chartOptions" />
+          <Doughnut v-if="vehicleChartData" :data="vehicleChartData" :options="chartOptions" />
           <div v-else class="no-data">Chưa có dữ liệu</div>
         </div>
       </div>
 
-      <!-- Category bar -->
+      <!-- Violations Bar -->
       <div class="card chart-card">
-        <h3>📈 Theo nhóm phương tiện</h3>
+        <h3>Vi pham giao thong (24h)</h3>
         <div class="chart-wrap">
-          <Bar v-if="barChartData" :data="barChartData" :options="barOptions" />
-          <div v-else class="no-data">Chưa có dữ liệu</div>
+          <Bar v-if="violationChartData" :data="violationChartData" :options="barOptions" />
+          <div v-else class="no-data">Chưa có vi phạm</div>
         </div>
       </div>
 
-      <!-- Quick upload card -->
+      <!-- Quick action card -->
       <div class="card quick-card">
-        <h3>⚡ Phân tích nhanh</h3>
-        <p class="quick-desc">Upload ảnh hoặc video để phân loại phương tiện</p>
+        <h3>He thong AI</h3>
+        <p class="quick-desc">Hệ thống phát hiện vi phạm giao thông tích hợp 4 model AI</p>
         <router-link to="/upload" class="btn btn--primary quick-btn">
-          📁 Upload & Phân tích
+          Upload & Phan tich
         </router-link>
         <div class="quick-stats">
           <div class="qs-item">
             <span class="qs-val">4</span>
-            <span class="qs-label">Loại xe</span>
+            <span class="qs-label">AI Models</span>
           </div>
           <div class="qs-item">
-            <span class="qs-val">YOLOv7</span>
-            <span class="qs-label">Model</span>
+            <span class="qs-val">YOLOv8n</span>
+            <span class="qs-label">Engine</span>
           </div>
         </div>
       </div>
@@ -103,30 +105,34 @@ import {
   BarElement, CategoryScale, LinearScale,
 } from 'chart.js'
 import DetectionTable from '@/components/DetectionTable.vue'
-import { getStats, getHealth } from '@/api/index.js'
+import { getStats, getViolationStats, getHealth } from '@/api/index.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale)
 
-const stats = ref({ total_detections: 0, by_class: {}, by_category: {} })
+const vehicleStats = ref({ total_detections: 0, by_class: {}, by_category: {} })
+const violStats = ref({ total_violations: 0, by_type: {} })
 const backendOk = ref(false)
 
 // ── Labels ──────────────────────────────────────────────────────
 const CLASS_LABELS = {
-  car: '🚙 Xe con', truck: '🚛 Xe tải', bus: '🚌 Xe buýt',
-  motorcycle: '🏍️ Xe máy', bicycle: '🚲 Xe đạp',
+  car: 'Xe con', truck: 'Xe tai', bus: 'Xe bus', motorcycle: 'Xe may',
 }
-const CAT_LABELS = { oto: 'Xe ô tô', xe_may: 'Xe máy', xe_dap: 'Xe đạp' }
+const VIOL_LABELS = {
+  no_helmet: 'Khong doi MBH',
+  no_seatbelt: 'Khong that day',
+  using_phone: 'Dung dien thoai',
+}
 
-// ── Doughnut ────────────────────────────────────────────────────
-const chartData = computed(() => {
-  const byClass = stats.value.by_class || {}
+// ── Vehicle Doughnut ────────────────────────────────────────────
+const vehicleChartData = computed(() => {
+  const byClass = vehicleStats.value.by_class || {}
   const keys = Object.keys(byClass)
   if (!keys.length) return null
   return {
     labels: keys.map(k => CLASS_LABELS[k] || k),
     datasets: [{
       data: keys.map(k => byClass[k]),
-      backgroundColor: ['#22c55e', '#f59e0b', '#06b6d4', '#ef4444', '#8b5cf6'],
+      backgroundColor: ['#22c55e', '#f59e0b', '#06b6d4', '#ef4444'],
       borderWidth: 0, hoverOffset: 8,
     }],
   }
@@ -140,17 +146,17 @@ const chartOptions = {
   },
 }
 
-// ── Bar chart ───────────────────────────────────────────────────
-const barChartData = computed(() => {
-  const byCat = stats.value.by_category || {}
-  const keys = Object.keys(byCat)
+// ── Violations Bar ──────────────────────────────────────────────
+const violationChartData = computed(() => {
+  const byType = violStats.value.by_type || {}
+  const keys = Object.keys(byType)
   if (!keys.length) return null
   return {
-    labels: keys.map(k => CAT_LABELS[k] || k),
+    labels: keys.map(k => VIOL_LABELS[k] || k),
     datasets: [{
-      label: 'Số lượng',
-      data: keys.map(k => byCat[k]),
-      backgroundColor: ['#22c55e', '#ef4444', '#8b5cf6'],
+      label: 'Vi pham',
+      data: keys.map(k => byType[k]),
+      backgroundColor: ['#ef4444', '#f59e0b', '#a855f7'],
       borderRadius: 8, borderSkipped: false,
     }],
   }
@@ -172,11 +178,14 @@ const barOptions = {
 // ── Load ────────────────────────────────────────────────────────
 async function loadStats() {
   try {
-    stats.value = await getStats(24)
+    vehicleStats.value = await getStats(24)
+  } catch {}
+  try {
+    violStats.value = await getViolationStats(24)
   } catch {}
   try {
     const h = await getHealth()
-    backendOk.value = h.status === 'ok' && h.models?.vehicle_detector === true
+    backendOk.value = h.status === 'ok'
   } catch { backendOk.value = false }
 }
 
@@ -220,6 +229,8 @@ onUnmounted(() => clearInterval(timer))
 .kpi-card--green::before  { background: var(--gradient-success); }
 .kpi-card--red    { background: linear-gradient(135deg, rgba(239,68,68,0.1), var(--bg-card)); }
 .kpi-card--red::before    { background: var(--gradient-danger); }
+.kpi-card--yellow { background: linear-gradient(135deg, rgba(245,158,11,0.1), var(--bg-card)); }
+.kpi-card--yellow::before { background: linear-gradient(135deg, #f59e0b, #d97706); }
 .kpi-card--purple { background: linear-gradient(135deg, rgba(139,92,246,0.1), var(--bg-card)); }
 .kpi-card--purple::before { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
 .kpi-icon  { font-size: 1.8rem; }
@@ -231,7 +242,7 @@ onUnmounted(() => clearInterval(timer))
   background: rgba(255,255,255,0.05); border-radius: var(--radius-full);
   padding: 2px 8px; border: 1px solid var(--border-color);
 }
-.kpi-trend--sub { font-size: 0.65rem; max-width: 90px; text-align: center; line-height: 1.3; }
+.kpi-trend--sub { font-size: 0.65rem; max-width: 110px; text-align: center; line-height: 1.3; }
 
 /* Charts row */
 .charts-row {

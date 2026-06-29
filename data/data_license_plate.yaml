@@ -1,0 +1,13 @@
+# Đường dẫn tuyệt đối đến thư mục chứa dataset
+path: M:/train_huong_tra/yolo_plate_dataset
+
+# Đường dẫn tương đối đến thư mục ảnh và label (đã sắp xếp)
+train: images/train
+val: images/train   # Nếu không có val riêng, dùng chính train
+
+# Số class
+nc: 1
+
+# Tên class
+names:
+  0: license_plate

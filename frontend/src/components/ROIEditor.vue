@@ -1,7 +1,7 @@
 <template>
   <div class="roi-editor" v-if="showEditor">
     <div class="roi-header">
-      <h4>🎯 Cấu hình vạch dừng (Stop Line)</h4>
+      <h4>Cau hinh vach dung (Stop Line)</h4>
       <button class="btn-close" @click="$emit('close')">✕</button>
     </div>
 
@@ -51,11 +51,11 @@
         </div>
 
         <button class="btn-save" @click="saveConfig">
-          💾 Lưu cấu hình
+          Luu cau hinh
         </button>
 
         <div v-if="saveStatus" class="save-status" :class="saveStatus">
-          {{ saveStatus === 'success' ? '✅ Đã lưu!' : '❌ Lỗi lưu' }}
+          {{ saveStatus === 'success' ? 'Da luu!' : 'Loi luu' }}
         </div>
       </div>
     </div>

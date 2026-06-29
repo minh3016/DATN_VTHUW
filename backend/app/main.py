@@ -1,6 +1,13 @@
 """
 main.py - FastAPI application chính
-Vehicle Classification System – YOLOv7
+Traffic Violation Detection System v4.0 – YOLOv8n
+
+Pipeline xử lý frame:
+  ① Vehicle Detection     (vehicle_detection.pt)   → phân loại xe
+  ② Violation Detection   (traffic_violation.pt)    → phát hiện vi phạm
+  ③ Plate Recognition     (license_plate.pt + license_ocr.pt) → biển số xe
+  ④ Draw bounding boxes + Overlay info
+  ⑤ Encode base64
 
 Endpoints:
   GET  /                              → health check
@@ -8,10 +15,14 @@ Endpoints:
   POST /api/cameras                   → thêm camera MJPEG
   DELETE /api/cameras/{id}            → dừng và xóa camera
   GET  /api/cameras/{id}/status       → trạng thái camera
-  GET  /api/detections                → danh sách phát hiện
+  GET  /api/detections                → danh sách phát hiện xe
   DELETE /api/detections/{id}         → xóa phát hiện
-  GET  /api/stats                     → thống kê phân loại
+  GET  /api/stats                     → thống kê phân loại xe
+  GET  /api/violations                → danh sách vi phạm
+  DELETE /api/violations/{id}         → xóa vi phạm
+  GET  /api/violations/stats          → thống kê vi phạm
   POST /api/analyze/frame             → phân tích 1 frame
+  POST /api/analyze/image             → upload ảnh phân tích
   POST /api/upload                    → upload video file
   POST /api/upload/{job_id}/analyze   → bắt đầu phân tích video
   GET  /api/upload/{job_id}/status    → trạng thái phân tích
@@ -48,6 +59,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .config import (
     CORS_ORIGINS, FRAME_WIDTH, FRAME_HEIGHT, PROCESS_FPS,
     EVIDENCE_DIR, UPLOAD_DIR, MAX_UPLOAD_DURATION_SEC, MAX_UPLOAD_SIZE_MB,
+    ENABLE_VEHICLE_DETECTION, ENABLE_VIOLATION_DETECTION, ENABLE_PLATE_RECOGNITION,
 )
 from .database import (
     connect_to_mongo,
@@ -57,6 +69,11 @@ from .database import (
     count_detections,
     delete_detection,
     get_stats,
+    create_violation,
+    get_violations,
+    count_violations,
+    delete_violation,
+    get_violation_stats,
     create_analysis_job,
     update_analysis_job,
     get_analysis_job,
@@ -64,6 +81,8 @@ from .database import (
 from .models import (
     DetectionCreate,
     DetectionResponse,
+    ViolationCreate,
+    ViolationResponse,
     MjpegStreamRequest,
     ProcessVideoRequest,
     CameraInfo,
@@ -73,6 +92,8 @@ from .models import (
 )
 from .websocket_manager import manager
 from .services.vehicle_detector import vehicle_detector
+from .services.violation_detector import violation_detector
+from .services.plate_recognizer import plate_recognizer
 from .services.mjpeg_reader import MJPEGReader
 from .utils.image_utils import (
     numpy_to_base64,
@@ -104,17 +125,22 @@ _analysis_tasks: Dict[str, asyncio.Task] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Khởi động Vehicle Classification API (YOLOv7)...")
+    logger.info("Khởi động Traffic Violation Detection API v4.0...")
     await connect_to_mongo()
 
     # Ensure directories
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load AI model
-    vehicle_detector.load()
+    # Load AI models
+    if ENABLE_VEHICLE_DETECTION:
+        vehicle_detector.load()
+    if ENABLE_VIOLATION_DETECTION:
+        violation_detector.load()
+    if ENABLE_PLATE_RECOGNITION:
+        plate_recognizer.load()
 
-    logger.info("Vehicle Classification service sẵn sàng")
+    logger.info("Traffic Violation Detection service sẵn sàng")
     yield
     logger.info("Dọn dẹp tài nguyên...")
     for cam in _cameras.values():
@@ -130,9 +156,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Vehicle Classification API",
-    description="Hệ thống phân loại xe cộ – YOLOv7 (car, truck, bus, motorcycle, bicycle)",
-    version="3.0.0",
+    title="Traffic Violation Detection API",
+    description="Hệ thống phát hiện vi phạm giao thông – YOLOv8n AI (4 models)",
+    version="4.0.0",
     lifespan=lifespan,
 )
 
@@ -146,7 +172,7 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Frame processing pipeline (1 bước – Vehicle Classification)
+# Frame processing pipeline (3 modules – Vehicle + Violation + Plate)
 # ---------------------------------------------------------------------------
 
 def _process_frame(
@@ -155,17 +181,36 @@ def _process_frame(
     camera_id: str = "CAM_01",
 ) -> dict:
     """
-    Xử lý 1 frame: phát hiện và phân loại phương tiện.
+    Xử lý 1 frame qua 3 module AI:
+    ① Vehicle Detection → phân loại phương tiện
+    ② Violation Detection → phát hiện vi phạm
+    ③ Plate Recognition → nhận diện biển số
+    ④ Draw bounding boxes
+    ⑤ Overlay info
+    ⑥ Encode base64
+
     Returns: dict kết quả + annotated frame base64.
     """
     t0 = time.time()
     annotated = frame.copy()
 
-    # ① Vehicle detection & classification (YOLOv7)
-    vehicles = vehicle_detector.detect(frame)
-    vehicle_count = len(vehicles)
+    # ① Vehicle Detection
+    vehicles = []
+    if ENABLE_VEHICLE_DETECTION and vehicle_detector.is_loaded:
+        vehicles = vehicle_detector.detect(frame)
 
-    # ② Draw bounding boxes (color by category)
+    # ② Violation Detection
+    violations = []
+    if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
+        violations = violation_detector.detect(frame, violations_only=True)
+
+    # ③ Plate Recognition
+    plates = []
+    if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
+        plates = plate_recognizer.detect_plates(frame)
+
+    # ④ Draw bounding boxes
+    # Vehicles (green/orange/blue tones)
     for v in vehicles:
         color = vehicle_detector.get_color(v.class_name)
         draw_bounding_box(
@@ -174,28 +219,66 @@ def _process_frame(
             f"{v.class_name} {v.bbox.conf:.0%}", color,
         )
 
-    # ③ Count by class and category
-    counts_by_class = vehicle_detector.count_by_class(vehicles)
-    counts_by_category = vehicle_detector.count_by_category(vehicles)
+    # Violations (red tones) - thick border
+    for viol in violations:
+        color = violation_detector.get_color(viol.violation_type)
+        draw_bounding_box(
+            annotated,
+            int(viol.bbox.x1), int(viol.bbox.y1),
+            int(viol.bbox.x2), int(viol.bbox.y2),
+            f"VP: {viol.violation_label} {viol.bbox.conf:.0%}", color,
+            thickness=3,
+        )
 
-    # ④ Overlay info
+    # Plates (yellow)
+    for plate in plates:
+        label = f"BS: {plate.plate_text}" if plate.plate_text else "Bien so"
+        draw_bounding_box(
+            annotated,
+            int(plate.bbox.x1), int(plate.bbox.y1),
+            int(plate.bbox.x2), int(plate.bbox.y2),
+            label, (0, 255, 255),  # Yellow
+        )
+
+    # ⑤ Count statistics
+    vehicle_count = len(vehicles)
+    violation_count = len(violations)
+    plate_count = len(plates)
+
+    counts_by_class = vehicle_detector.count_by_class(vehicles) if vehicles else {}
+    counts_by_category = vehicle_detector.count_by_category(vehicles) if vehicles else {}
+    counts_by_violation = violation_detector.count_by_type(violations) if violations else {}
+
+    # ⑥ Overlay info
     fps = 1.0 / max(time.time() - t0, 0.001)
     annotated = add_overlay_info(
-        annotated, vehicle_count, 0,
+        annotated,
+        vehicle_count=vehicle_count,
+        violation_count=violation_count,
+        plate_count=plate_count,
         fps=fps,
         camera_id=camera_id,
     )
 
-    # ⑤ Encode annotated frame
+    # ⑦ Encode annotated frame
     frame_b64 = numpy_to_base64(annotated, quality=70)
 
     return {
         "frame_id": frame_id,
         "timestamp": datetime.utcnow().isoformat(),
+        # Vehicles
         "vehicle_count": vehicle_count,
         "vehicles": [v.model_dump() for v in vehicles],
         "counts_by_class": counts_by_class,
         "counts_by_category": counts_by_category,
+        # Violations
+        "violation_count": violation_count,
+        "violations": [viol.model_dump() for viol in violations],
+        "counts_by_violation": counts_by_violation,
+        # Plates
+        "plate_count": plate_count,
+        "plates": [p.model_dump() for p in plates],
+        # Meta
         "fps": fps,
         "frame_base64": frame_b64,
     }
@@ -209,11 +292,17 @@ def _process_frame(
 async def health_check():
     return {
         "status": "ok",
-        "service": "Vehicle Classification API",
-        "version": "3.0.0",
-        "mode": "YOLOv7",
+        "service": "Traffic Violation Detection API",
+        "version": "4.0.0",
         "models": {
             "vehicle_detector": vehicle_detector.is_loaded,
+            "violation_detector": violation_detector.is_loaded,
+            "plate_recognizer": plate_recognizer.is_loaded,
+        },
+        "modules": {
+            "vehicle_detection": ENABLE_VEHICLE_DETECTION,
+            "violation_detection": ENABLE_VIOLATION_DETECTION,
+            "plate_recognition": ENABLE_PLATE_RECOGNITION,
         },
         "cameras": {cid: c.get("info", {}).get("status", "unknown")
                     for cid, c in _cameras.items()},
@@ -270,7 +359,7 @@ async def camera_status(camera_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Detections CRUD (thay thế violations)
+# Detections CRUD (vehicles)
 # ---------------------------------------------------------------------------
 
 @app.get("/api/detections")
@@ -295,12 +384,44 @@ async def remove_detection(detection_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Violations CRUD (vi phạm giao thông)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/violations")
+async def list_violations(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    violation_type: Optional[str] = None,
+    camera_id: Optional[str] = None,
+    plate_text: Optional[str] = None,
+):
+    violations_list = await get_violations(
+        skip, limit, violation_type, camera_id, plate_text
+    )
+    total = await count_violations(violation_type, camera_id)
+    return {"violations": violations_list, "total": total, "skip": skip, "limit": limit}
+
+
+@app.delete("/api/violations/{violation_id}")
+async def remove_violation(violation_id: str):
+    success = await delete_violation(violation_id)
+    if not success:
+        raise HTTPException(404, "Violation not found")
+    return {"message": "Violation deleted"}
+
+
+# ---------------------------------------------------------------------------
 # Stats
 # ---------------------------------------------------------------------------
 
 @app.get("/api/stats")
 async def stats(hours: int = Query(24, ge=1)):
     return await get_stats(hours)
+
+
+@app.get("/api/violations/stats")
+async def violation_stats(hours: int = Query(24, ge=1)):
+    return await get_violation_stats(hours)
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +441,7 @@ async def analyze_frame(payload: dict):
 
 @app.post("/api/analyze/image")
 async def analyze_image(file: UploadFile = File(...)):
-    """Upload 1 ảnh để phân tích phân loại xe."""
+    """Upload 1 ảnh để phân tích (vehicles + violations + plates)."""
     # Validate file type
     allowed = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
     ext = Path(file.filename).suffix.lower()
@@ -348,7 +469,7 @@ async def analyze_image(file: UploadFile = File(...)):
     evidence_path = save_evidence(frame, f"img_{evidence_id}")
 
     # Save detections to DB
-    saved_ids = []
+    saved_detection_ids = []
     for v in result.get("vehicles", []):
         det_id = await create_detection(DetectionCreate(
             vehicle_class=v["class_name"],
@@ -360,11 +481,33 @@ async def analyze_image(file: UploadFile = File(...)):
             evidence_path=evidence_path,
         ))
         if det_id:
-            saved_ids.append(det_id)
+            saved_detection_ids.append(det_id)
+
+    # Save violations to DB
+    saved_violation_ids = []
+    # Lấy biển số đầu tiên (nếu có) để gắn vào vi phạm
+    first_plate = ""
+    if result.get("plates"):
+        first_plate = result["plates"][0].get("plate_text", "")
+
+    for viol in result.get("violations", []):
+        viol_id = await create_violation(ViolationCreate(
+            violation_type=viol["violation_type"],
+            violation_label=viol["violation_label"],
+            confidence=viol["bbox"]["conf"],
+            plate_text=first_plate or None,
+            camera_id="UPLOAD_IMG",
+            source_type="image",
+            source_file=file.filename,
+            evidence_path=evidence_path,
+        ))
+        if viol_id:
+            saved_violation_ids.append(viol_id)
 
     result["evidence_path"] = evidence_path
     result["source_file"] = file.filename
-    result["saved_detection_ids"] = saved_ids
+    result["saved_detection_ids"] = saved_detection_ids
+    result["saved_violation_ids"] = saved_violation_ids
 
     return result
 
@@ -417,7 +560,7 @@ async def upload_video(file: UploadFile = File(...)):
 
     # Calculate processing frames (downsampled)
     process_frames = int(duration_sec * PROCESS_FPS)
-    estimated_sec = process_frames * 0.5  # ~0.5s per frame
+    estimated_sec = process_frames * 0.8  # ~0.8s per frame (4 models)
 
     # Create analysis job in DB
     job_id = await create_analysis_job(
@@ -477,7 +620,7 @@ async def start_analysis(job_id: str):
 
 
 async def _analyze_video_task(job_id: str, video_path: str):
-    """Background task: process video frame by frame."""
+    """Background task: process video frame by frame with all AI modules."""
     try:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -501,8 +644,11 @@ async def _analyze_video_task(job_id: str, video_path: str):
         frame_idx = 0
         processed = 0
         vehicles_total = 0
+        violations_total = 0
+        plates_total = 0
         cumulative_by_class: dict = {}
         cumulative_by_category: dict = {}
+        cumulative_by_violation: dict = {}
 
         while True:
             ret, frame = cap.read()
@@ -528,37 +674,70 @@ async def _analyze_video_task(job_id: str, video_path: str):
                 processed += 1
                 continue
 
-            frame_count = result.get("vehicle_count", 0)
-            vehicles_total += frame_count
+            frame_vehicles = result.get("vehicle_count", 0)
+            frame_violations = result.get("violation_count", 0)
+            frame_plates = result.get("plate_count", 0)
+            vehicles_total += frame_vehicles
+            violations_total += frame_violations
+            plates_total += frame_plates
 
             # Debug log every 30 frames
             if processed % 30 == 0:
-                logger.info(f"  Frame {processed}: {frame_count} vehicles, "
-                             f"frame shape: {frame.shape}, "
-                             f"total so far: {vehicles_total}")
+                logger.info(f"  Frame {processed}: {frame_vehicles} vehicles, "
+                             f"{frame_violations} violations, {frame_plates} plates")
 
             # Accumulate counts
             for cls, cnt in result.get("counts_by_class", {}).items():
                 cumulative_by_class[cls] = cumulative_by_class.get(cls, 0) + cnt
             for cat, cnt in result.get("counts_by_category", {}).items():
                 cumulative_by_category[cat] = cumulative_by_category.get(cat, 0) + cnt
+            for vtype, cnt in result.get("counts_by_violation", {}).items():
+                cumulative_by_violation[vtype] = cumulative_by_violation.get(vtype, 0) + cnt
 
-            # Save detections to DB (sample – save 1 per class per 30 frames)
-            if processed % 30 == 0 and result.get("vehicles"):
-                seen_classes = set()
-                for v in result["vehicles"]:
-                    if v["class_name"] not in seen_classes:
-                        evidence_path = save_evidence(frame, f"{job_id}_{processed}_{v['class_name']}")
-                        await create_detection(DetectionCreate(
-                            vehicle_class=v["class_name"],
-                            category=v["category"],
-                            confidence=v["bbox"]["conf"],
-                            camera_id="UPLOAD",
-                            source_type="upload",
-                            source_file=Path(video_path).name,
-                            evidence_path=evidence_path,
-                        ))
-                        seen_classes.add(v["class_name"])
+            # Save detections + violations to DB (sample – every 30 frames)
+            if processed % 30 == 0:
+                # Save vehicle detections
+                if result.get("vehicles"):
+                    seen_classes = set()
+                    for v in result["vehicles"]:
+                        if v["class_name"] not in seen_classes:
+                            evidence_path = save_evidence(
+                                frame, f"{job_id}_{processed}_{v['class_name']}"
+                            )
+                            await create_detection(DetectionCreate(
+                                vehicle_class=v["class_name"],
+                                category=v["category"],
+                                confidence=v["bbox"]["conf"],
+                                camera_id="UPLOAD",
+                                source_type="upload",
+                                source_file=Path(video_path).name,
+                                evidence_path=evidence_path,
+                            ))
+                            seen_classes.add(v["class_name"])
+
+                # Save violations
+                if result.get("violations"):
+                    first_plate = ""
+                    if result.get("plates"):
+                        first_plate = result["plates"][0].get("plate_text", "")
+
+                    seen_types = set()
+                    for viol in result["violations"]:
+                        if viol["violation_type"] not in seen_types:
+                            evidence_path = save_evidence(
+                                frame, f"{job_id}_{processed}_viol_{viol['violation_type']}"
+                            )
+                            await create_violation(ViolationCreate(
+                                violation_type=viol["violation_type"],
+                                violation_label=viol["violation_label"],
+                                confidence=viol["bbox"]["conf"],
+                                plate_text=first_plate or None,
+                                camera_id="UPLOAD",
+                                source_type="upload",
+                                source_file=Path(video_path).name,
+                                evidence_path=evidence_path,
+                            ))
+                            seen_types.add(viol["violation_type"])
 
             # Broadcast via WebSocket
             await manager.broadcast({
@@ -580,8 +759,11 @@ async def _analyze_video_task(job_id: str, video_path: str):
                     progress=min(1.0, processed / max(total_process, 1)),
                     processed_frames=processed,
                     vehicles_detected=vehicles_total,
+                    violations_detected=violations_total,
+                    plates_detected=plates_total,
                     counts_by_class=cumulative_by_class,
                     counts_by_category=cumulative_by_category,
+                    counts_by_violation=cumulative_by_violation,
                 )
 
             frame_idx += 1
@@ -596,12 +778,16 @@ async def _analyze_video_task(job_id: str, video_path: str):
             progress=1.0,
             processed_frames=processed,
             vehicles_detected=vehicles_total,
+            violations_detected=violations_total,
+            plates_detected=plates_total,
             counts_by_class=cumulative_by_class,
             counts_by_category=cumulative_by_category,
+            counts_by_violation=cumulative_by_violation,
             completed_at=datetime.utcnow(),
         )
         logger.info(f"✅ Analysis complete: {job_id} – {processed} frames, "
-                     f"{vehicles_total} vehicles")
+                     f"{vehicles_total} vehicles, {violations_total} violations, "
+                     f"{plates_total} plates")
 
     except asyncio.CancelledError:
         await update_analysis_job(job_id, status="error",
@@ -627,8 +813,11 @@ async def analysis_status(job_id: str):
         total_frames=job.get("total_frames", 0),
         processed_frames=job.get("processed_frames", 0),
         vehicles_detected=job.get("vehicles_detected", 0),
+        violations_detected=job.get("violations_detected", 0),
+        plates_detected=job.get("plates_detected", 0),
         counts_by_class=job.get("counts_by_class", {}),
         counts_by_category=job.get("counts_by_category", {}),
+        counts_by_violation=job.get("counts_by_violation", {}),
         error_message=job.get("error_message"),
     )
 
@@ -705,7 +894,7 @@ async def stream_status():
 
 async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                         frame_skip: int = 2, reconnect: bool = True):
-    """Background task: read MJPEG stream and classify vehicles."""
+    """Background task: read MJPEG stream and process with all AI modules."""
     frame_idx = 0
     try:
         if not reader.connect():
@@ -745,20 +934,47 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
             )
 
             # Save detection samples to DB (every 60 frames)
-            if frame_idx % 60 == 0 and result.get("vehicles"):
-                seen = set()
-                for v in result["vehicles"]:
-                    if v["class_name"] not in seen:
-                        evidence_path = save_evidence(frame, f"stream_{camera_id}_{frame_idx}_{v['class_name']}")
-                        await create_detection(DetectionCreate(
-                            vehicle_class=v["class_name"],
-                            category=v["category"],
-                            confidence=v["bbox"]["conf"],
-                            camera_id=camera_id,
-                            source_type="stream",
-                            evidence_path=evidence_path,
-                        ))
-                        seen.add(v["class_name"])
+            if frame_idx % 60 == 0:
+                # Save vehicle detections
+                if result.get("vehicles"):
+                    seen = set()
+                    for v in result["vehicles"]:
+                        if v["class_name"] not in seen:
+                            evidence_path = save_evidence(
+                                frame, f"stream_{camera_id}_{frame_idx}_{v['class_name']}"
+                            )
+                            await create_detection(DetectionCreate(
+                                vehicle_class=v["class_name"],
+                                category=v["category"],
+                                confidence=v["bbox"]["conf"],
+                                camera_id=camera_id,
+                                source_type="stream",
+                                evidence_path=evidence_path,
+                            ))
+                            seen.add(v["class_name"])
+
+                # Save violations
+                if result.get("violations"):
+                    first_plate = ""
+                    if result.get("plates"):
+                        first_plate = result["plates"][0].get("plate_text", "")
+
+                    seen_types = set()
+                    for viol in result["violations"]:
+                        if viol["violation_type"] not in seen_types:
+                            evidence_path = save_evidence(
+                                frame, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
+                            )
+                            await create_violation(ViolationCreate(
+                                violation_type=viol["violation_type"],
+                                violation_label=viol["violation_label"],
+                                confidence=viol["bbox"]["conf"],
+                                plate_text=first_plate or None,
+                                camera_id=camera_id,
+                                source_type="stream",
+                                evidence_path=evidence_path,
+                            ))
+                            seen_types.add(viol["violation_type"])
 
             await asyncio.sleep(0.01)
 

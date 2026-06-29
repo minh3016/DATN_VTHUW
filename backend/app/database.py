@@ -1,7 +1,7 @@
 """
 database.py - Kết nối MongoDB và CRUD operations
-Vehicle Classification System – YOLOv7
-Collections: detections, analysis_jobs
+Traffic Violation Detection System v4.0
+Collections: detections, violations, analysis_jobs
 """
 import logging
 from datetime import datetime, timedelta
@@ -11,7 +11,7 @@ from pymongo import DESCENDING
 from bson import ObjectId
 
 from .config import MONGO_URI, MONGO_DB
-from .models import DetectionCreate
+from .models import DetectionCreate, ViolationCreate
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +45,29 @@ def get_db() -> Optional[AsyncIOMotorDatabase]:
 async def _ensure_indexes() -> None:
     if _db is None:
         return
+
+    # Detections indexes
     detections = _db["detections"]
     await detections.create_index([("created_at", DESCENDING)])
     await detections.create_index([("vehicle_class", 1)])
     await detections.create_index([("category", 1)])
     await detections.create_index([("camera_id", 1)])
 
+    # Violations indexes
+    violations = _db["violations"]
+    await violations.create_index([("created_at", DESCENDING)])
+    await violations.create_index([("violation_type", 1)])
+    await violations.create_index([("plate_text", 1)])
+    await violations.create_index([("camera_id", 1)])
+
+    # Analysis jobs indexes
     jobs = _db["analysis_jobs"]
     await jobs.create_index([("status", 1)])
     await jobs.create_index([("created_at", DESCENDING)])
 
 
 # ---------------------------------------------------------------------------
-# CRUD – Detections (thay thế violations)
+# CRUD – Detections (vehicles)
 # ---------------------------------------------------------------------------
 
 async def create_detection(data: DetectionCreate) -> Optional[str]:
@@ -167,6 +177,103 @@ async def get_stats(hours: int = 24) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# CRUD – Violations (vi phạm giao thông)
+# ---------------------------------------------------------------------------
+
+async def create_violation(data: ViolationCreate) -> Optional[str]:
+    if _db is None:
+        return None
+    doc = data.model_dump()
+    doc["created_at"] = datetime.utcnow()
+    result = await _db["violations"].insert_one(doc)
+    return str(result.inserted_id)
+
+
+async def get_violations(
+    skip: int = 0,
+    limit: int = 50,
+    violation_type: Optional[str] = None,
+    camera_id: Optional[str] = None,
+    plate_text: Optional[str] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+) -> List[dict]:
+    if _db is None:
+        return []
+    query: dict = {}
+    if violation_type:
+        query["violation_type"] = violation_type
+    if camera_id:
+        query["camera_id"] = camera_id
+    if plate_text:
+        # Tìm kiếm biển số chứa chuỗi con (case-insensitive)
+        query["plate_text"] = {"$regex": plate_text, "$options": "i"}
+    if start_time or end_time:
+        query["created_at"] = {}
+        if start_time:
+            query["created_at"]["$gte"] = start_time
+        if end_time:
+            query["created_at"]["$lte"] = end_time
+
+    cursor = (
+        _db["violations"]
+        .find(query)
+        .sort("created_at", DESCENDING)
+        .skip(skip)
+        .limit(limit)
+    )
+    docs = await cursor.to_list(length=limit)
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+    return docs
+
+
+async def count_violations(
+    violation_type: Optional[str] = None,
+    camera_id: Optional[str] = None,
+) -> int:
+    if _db is None:
+        return 0
+    query: dict = {}
+    if violation_type:
+        query["violation_type"] = violation_type
+    if camera_id:
+        query["camera_id"] = camera_id
+    return await _db["violations"].count_documents(query)
+
+
+async def delete_violation(violation_id: str) -> bool:
+    if _db is None:
+        return False
+    result = await _db["violations"].delete_one({"_id": ObjectId(violation_id)})
+    return result.deleted_count > 0
+
+
+async def get_violation_stats(hours: int = 24) -> dict:
+    """Thống kê vi phạm theo loại"""
+    if _db is None:
+        return {}
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    pipeline = [
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": "$violation_type", "count": {"$sum": 1}}},
+    ]
+    cursor = _db["violations"].aggregate(pipeline)
+    results = await cursor.to_list(length=100)
+    by_type = {item["_id"]: item["count"] for item in results if item["_id"]}
+
+    total = sum(by_type.values())
+    return {
+        "period_hours": hours,
+        "period_start": since.isoformat(),
+        "period_end": datetime.utcnow().isoformat(),
+        "total_violations": total,
+        "by_type": by_type,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CRUD – Analysis Jobs
 # ---------------------------------------------------------------------------
 
@@ -184,8 +291,11 @@ async def create_analysis_job(filename: str, file_size: int,
         "progress": 0.0,
         "processed_frames": 0,
         "vehicles_detected": 0,
+        "violations_detected": 0,
+        "plates_detected": 0,
         "counts_by_class": {},
         "counts_by_category": {},
+        "counts_by_violation": {},
         "error_message": None,
         "created_at": datetime.utcnow(),
         "started_at": None,
