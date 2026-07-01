@@ -48,6 +48,30 @@ def resize_keep_aspect(
     return img
 
 
+def vietnamese_to_ascii(text: str) -> str:
+    """Chuyển đổi tiếng Việt có dấu thành không dấu để hiển thị bằng cv2.putText"""
+    patterns = {
+        '[àáảãạăằắẳẵặâầấẩẫậ]': 'a',
+        '[ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]': 'A',
+        '[èéẻẽẹêềếểễệ]': 'e',
+        '[ÈÉẺẼẸÊỀẾỂỄỆ]': 'E',
+        '[ìíỉĩị]': 'i',
+        '[ÌÍỈĨỊ]': 'I',
+        '[òóỏõọôồốổỗộơờớởỡợ]': 'o',
+        '[ÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]': 'O',
+        '[ùúủũụưừứửữự]': 'u',
+        '[ÙÚỦŨỤƯỪỨỬỮỰ]': 'U',
+        '[ỳýỷỹỵ]': 'y',
+        '[ỲÝỶỸỴ]': 'Y',
+        '[đ]': 'd',
+        '[Đ]': 'D'
+    }
+    import re
+    for pattern, replacement in patterns.items():
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
 def draw_bounding_box(
     img: np.ndarray,
     x1: int,
@@ -61,10 +85,12 @@ def draw_bounding_box(
     """Vẽ bounding box và label lên ảnh"""
     cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
     if label:
+        # Chuyển đổi nhãn sang ASCII không dấu để tránh lỗi font OpenCV hiển thị dấu hỏi '?'
+        safe_label = vietnamese_to_ascii(label)
         font_scale = 0.6
         font_thickness = 1
         (text_w, text_h), baseline = cv2.getTextSize(
-            label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+            safe_label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
         )
         # Nền cho chữ
         cv2.rectangle(
@@ -76,7 +102,7 @@ def draw_bounding_box(
         )
         cv2.putText(
             img,
-            label,
+            safe_label,
             (x1 + 2, y1 - baseline - 2),
             cv2.FONT_HERSHEY_SIMPLEX,
             font_scale,
@@ -149,3 +175,39 @@ def add_overlay_info(
             cv2.LINE_AA,
         )
     return img
+
+
+def calculate_containment_ratio(
+    box_inner: Tuple[float, float, float, float],
+    box_outer: Tuple[float, float, float, float],
+) -> float:
+    """
+    Tính tỉ lệ diện tích hộp nhỏ (box_inner) nằm trong hộp lớn (box_outer).
+    Định dạng hộp: (x1, y1, x2, y2).
+    Dùng để khớp vi phạm/biển số vào đúng phương tiện.
+    """
+    x1_in, y1_in, x2_in, y2_in = box_inner
+    x1_out, y1_out, x2_out, y2_out = box_outer
+
+    # Tính toạ độ phần giao nhau
+    x1_inter = max(x1_in, x1_out)
+    y1_inter = max(y1_in, y1_out)
+    x2_inter = min(x2_in, x2_out)
+    y2_inter = min(y2_in, y2_out)
+
+    inter_w = max(0.0, x2_inter - x1_inter)
+    inter_h = max(0.0, y2_inter - y1_inter)
+    inter_area = inter_w * inter_h
+
+    # Diện tích của hộp nhỏ
+    inner_w = max(0.0, x2_in - y1_in) # Chờ chút, x2_in - x1_in chứ không phải y1_in!
+    # Sửa:
+    inner_w = max(0.0, x2_in - x1_in)
+    inner_h = max(0.0, y2_in - y1_in)
+    inner_area = inner_w * inner_h
+
+    if inner_area <= 0:
+        return 0.0
+
+    return inter_area / inner_area
+

@@ -56,8 +56,10 @@ def save_evidence(frame: np.ndarray, violation_id: str = None,
 
 def get_evidence_path(relative_path: str) -> Path:
     """Convert relative evidence path to absolute path."""
-    # relative_path = "evidence/2026-06-04/viol_abc123.jpg"
-    return EVIDENCE_DIR.parent / relative_path
+    # Handles both "evidence/2026-06-04/viol_abc.jpg" and "2026-06-04/viol_abc.jpg"
+    if relative_path.startswith("evidence/"):
+        return EVIDENCE_DIR.parent / relative_path
+    return EVIDENCE_DIR / relative_path
 
 
 def cleanup_old_evidence(days: int = 30) -> int:

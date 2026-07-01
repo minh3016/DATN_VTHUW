@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+import torch
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +64,10 @@ class YOLOWrapper:
             return False
 
     def detect(
-        self, frame: np.ndarray, conf: Optional[float] = None
+        self,
+        frame: np.ndarray,
+        conf: Optional[float] = None,
+        imgsz: Optional[int] = None,
     ) -> List[Tuple[float, float, float, float, float, int]]:
         """
         Detect objects in frame (thread-safe).
@@ -70,6 +75,7 @@ class YOLOWrapper:
         Args:
             frame: BGR numpy array
             conf: Override confidence threshold (None = use default)
+            imgsz: Override inference size (None = use default)
 
         Returns:
             List of (x1, y1, x2, y2, confidence, class_id)
@@ -80,18 +86,22 @@ class YOLOWrapper:
         threshold = conf if conf is not None else self.conf
 
         with self._lock:
-            try:
-                results = self.model(frame, conf=threshold, verbose=False)[0]
-                detections = []
-                for box in results.boxes:
-                    x1, y1, x2, y2 = map(float, box.xyxy[0])
-                    c = float(box.conf[0])
-                    cls = int(box.cls[0])
-                    detections.append((x1, y1, x2, y2, c, cls))
-                return detections
-            except Exception as e:
-                logger.warning(f"[{self.model_name}] Inference error: {e}")
-                return []
+            with torch.inference_mode():
+                try:
+                    kwargs = {"conf": threshold, "verbose": False}
+                    if imgsz is not None:
+                        kwargs["imgsz"] = imgsz
+                    results = self.model(frame, **kwargs)[0]
+                    detections = []
+                    for box in results.boxes:
+                        x1, y1, x2, y2 = map(float, box.xyxy[0])
+                        c = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        detections.append((x1, y1, x2, y2, c, cls))
+                    return detections
+                except Exception as e:
+                    logger.warning(f"[{self.model_name}] Inference error: {e}")
+                    return []
 
     @property
     def class_names(self) -> Dict[int, str]:

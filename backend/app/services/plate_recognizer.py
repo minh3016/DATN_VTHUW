@@ -104,16 +104,47 @@ class PlateRecognizer:
             if plate_crop.size == 0 or plate_crop.shape[0] < 5 or plate_crop.shape[1] < 10:
                 continue
 
-            # Preprocess plate crop
+            # Preprocess plate crop (contrast enhancement + sharpening + scaling)
             plate_crop_processed = self._preprocess_plate(plate_crop)
 
-            # Step 2: OCR ký tự
-            plate_text, char_confs, avg_conf = self._recognize_chars(plate_crop_processed)
+            # Step 2: OCR ký tự (chạy ở imgsz=320 để tối ưu tốc độ trên CPU)
+            plate_text, char_confs, avg_conf, sorted_chars = self._recognize_chars(plate_crop_processed)
 
-            # Encode plate crop image to base64 (nhỏ, cho frontend hiển thị)
+            # Scale coordinates back to original plate_crop size
+            orig_h, orig_w = plate_crop.shape[:2]
+            proc_h, proc_w = plate_crop_processed.shape[:2]
+            scale_w = orig_w / proc_w if proc_w > 0 else 1.0
+            scale_h = orig_h / proc_h if proc_h > 0 else 1.0
+
+            from ..models import CharDetection
+            char_boxes = []
+            for c_info in sorted_chars:
+                cx1 = c_info["x1"] * scale_w
+                cy1 = c_info["y1"] * scale_h
+                cx2 = c_info["x2"] * scale_w
+                cy2 = c_info["y2"] * scale_h
+                char_boxes.append(
+                    CharDetection(
+                        char=c_info["char"],
+                        bbox=BoundingBox(x1=cx1, y1=cy1, x2=cx2, y2=cy2, conf=c_info["conf"])
+                    )
+                )
+
+            # Vẽ bounding box cho từng ký tự trên bản sao của ảnh crop biển số để hiển thị trực quan
+            plate_crop_drawn = plate_crop.copy()
+            for cb in char_boxes:
+                cv2.rectangle(
+                    plate_crop_drawn,
+                    (int(cb.bbox.x1), int(cb.bbox.y1)),
+                    (int(cb.bbox.x2), int(cb.bbox.y2)),
+                    (0, 255, 0),  # Màu xanh lá cây
+                    1
+                )
+
+            # Encode plate crop image to base64
             plate_b64 = None
             try:
-                plate_b64 = numpy_to_base64(plate_crop, quality=85)
+                plate_b64 = numpy_to_base64(plate_crop_drawn, quality=85)
             except Exception:
                 pass
 
@@ -121,6 +152,7 @@ class PlateRecognizer:
                 PlateDetection(
                     bbox=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, conf=det_conf),
                     plate_text=plate_text,
+                    char_boxes=char_boxes,
                     char_confidences=char_confs,
                     avg_ocr_confidence=avg_conf,
                     plate_image_base64=plate_b64,
@@ -131,17 +163,39 @@ class PlateRecognizer:
 
     def _preprocess_plate(self, crop: np.ndarray) -> np.ndarray:
         """
-        Tiền xử lý ảnh biển số trước khi OCR.
-        Resize lên kích thước tối thiểu để OCR chính xác hơn.
+        Tiền xử lý ảnh biển số trước khi OCR:
+        - Tăng cường độ tương phản cục bộ (CLAHE)
+        - Làm nét biên ký tự (Unsharp Masking)
+        - Phóng to lên kích thước tối thiểu để mô hình nhận diện chính xác
         """
+        if crop.size == 0:
+            return crop
+
+        # 1. Tăng cường độ tương phản sử dụng CLAHE trên kênh màu L (LAB)
+        try:
+            lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l)
+            limg = cv2.merge((cl, a, b))
+            crop = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+        except Exception as e:
+            logger.warning(f"Error applying CLAHE: {e}")
+
+        # 2. Làm nét ảnh sử dụng Unsharp Masking
+        try:
+            blurred = cv2.GaussianBlur(crop, (0, 0), 3)
+            crop = cv2.addWeighted(crop, 1.6, blurred, -0.6, 0)
+        except Exception as e:
+            logger.warning(f"Error sharpening crop: {e}")
+
+        # 3. Phóng to ảnh
         h, w = crop.shape[:2]
-        # Resize chiều cao tối thiểu 80px
         if h < 80:
             scale = 80 / h
             new_w = int(w * scale)
             new_h = 80
             crop = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-        # Resize chiều rộng tối thiểu 200px
         if crop.shape[1] < 200:
             scale = 200 / crop.shape[1]
             new_w = 200
@@ -151,24 +205,18 @@ class PlateRecognizer:
 
     def _recognize_chars(
         self, plate_crop: np.ndarray
-    ) -> Tuple[str, List[float], float]:
+    ) -> Tuple[str, List[float], float, List[dict]]:
         """
         Nhận diện ký tự trên ảnh biển số bằng license_ocr.pt.
-
-        Model detect từng ký tự riêng lẻ (mỗi class là 1 ký tự: 0-9, A-Z).
-        Sắp xếp theo vị trí:
-          - Nếu biển 1 dòng: sắp theo x (trái→phải)
-          - Nếu biển 2 dòng: chia theo y (trên/dưới) rồi sắp theo x mỗi dòng
-
-        Returns:
-            (plate_text, char_confidences, avg_confidence)
+        Chạy ở kích thước imgsz=320 để tối ưu hiệu năng CPU gấp ~4 lần.
         """
         if not self._ocr.is_loaded:
-            return "", [], 0.0
+            return "", [], 0.0, []
 
-        raw_chars = self._ocr.detect(plate_crop)
+        # Chạy YOLOv8 OCR với imgsz=320
+        raw_chars = self._ocr.detect(plate_crop, conf=PLATE_OCR_CONF, imgsz=320)
         if not raw_chars:
-            return "", [], 0.0
+            return "", [], 0.0, []
 
         # Lấy thông tin từng ký tự
         ocr_class_names = self._ocr.class_names
@@ -189,32 +237,32 @@ class PlateRecognizer:
             })
 
         if not chars_info:
-            return "", [], 0.0
+            return "", [], 0.0, []
 
         # Xác định biển 1 dòng hay 2 dòng
-        plate_text, char_confs = self._arrange_chars(chars_info, plate_crop.shape[0])
+        plate_text, char_confs, sorted_chars = self._arrange_chars(chars_info, plate_crop.shape[0])
 
         avg_conf = sum(char_confs) / len(char_confs) if char_confs else 0.0
-        return plate_text, char_confs, avg_conf
+        return plate_text, char_confs, avg_conf, sorted_chars
 
     def _arrange_chars(
         self,
         chars_info: List[dict],
         plate_height: int,
-    ) -> Tuple[str, List[float]]:
+    ) -> Tuple[str, List[float], List[dict]]:
         """
         Sắp xếp ký tự thành biển số hoàn chỉnh.
         Tự động phát hiện biển 1 dòng hoặc 2 dòng dựa trên phân bố y.
         """
         if not chars_info:
-            return "", []
+            return "", [], []
 
         # Tính phân bố y để xác định 1 dòng hay 2 dòng
         cy_values = [c["cy"] for c in chars_info]
         cy_min, cy_max = min(cy_values), max(cy_values)
         cy_range = cy_max - cy_min
 
-        # Nếu phạm vi y > 40% chiều cao plate → biển 2 dòng
+        # Nếu phạm vi y > 35% chiều cao plate → biển 2 dòng
         is_2line = cy_range > plate_height * 0.35 and len(chars_info) >= 4
 
         if is_2line:
@@ -237,7 +285,7 @@ class PlateRecognizer:
         plate_text = "".join(c["char"] for c in all_sorted)
         char_confs = [c["conf"] for c in all_sorted]
 
-        return plate_text, char_confs
+        return plate_text, char_confs, all_sorted
 
     @property
     def is_loaded(self) -> bool:

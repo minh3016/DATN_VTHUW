@@ -199,15 +199,54 @@ def _process_frame(
     if ENABLE_VEHICLE_DETECTION and vehicle_detector.is_loaded:
         vehicles = vehicle_detector.detect(frame)
 
-    # ② Violation Detection
     violations = []
-    if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
-        violations = violation_detector.detect(frame, violations_only=True)
-
-    # ③ Plate Recognition
     plates = []
-    if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
-        plates = plate_recognizer.detect_plates(frame)
+
+    # Tối ưu hóa: Bỏ qua phát hiện vi phạm và biển số nếu không phát hiện xe nào
+    should_process = len(vehicles) > 0 or not ENABLE_VEHICLE_DETECTION
+
+    if should_process:
+        # ② Violation Detection
+        if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
+            violations = violation_detector.detect(frame, violations_only=True)
+
+        # ③ Plate Recognition
+        if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
+            plates = plate_recognizer.detect_plates(frame)
+
+        # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng
+        from .utils.image_utils import calculate_containment_ratio
+
+        # Ánh xạ vehicle_idx -> plate_text
+        vehicle_to_plate = {}
+        for plate in plates:
+            best_idx = -1
+            best_ratio = 0.0
+            p_box = (plate.bbox.x1, plate.bbox.y1, plate.bbox.x2, plate.bbox.y2)
+            for idx, v in enumerate(vehicles):
+                v_box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
+                ratio = calculate_containment_ratio(p_box, v_box)
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_idx = idx
+            if best_idx != -1 and best_ratio > 0.25:
+                vehicle_to_plate[best_idx] = plate.plate_text
+
+        # Cập nhật vehicle_class và plate_text cho từng vi phạm
+        for viol in violations:
+            best_idx = -1
+            best_ratio = 0.0
+            viol_box = (viol.bbox.x1, viol.bbox.y1, viol.bbox.x2, viol.bbox.y2)
+            for idx, v in enumerate(vehicles):
+                v_box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
+                ratio = calculate_containment_ratio(viol_box, v_box)
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_idx = idx
+            if best_idx != -1 and best_ratio > 0.25:
+                matching_vehicle = vehicles[best_idx]
+                viol.vehicle_class = matching_vehicle.class_name
+                viol.plate_text = vehicle_to_plate.get(best_idx)
 
     # ④ Draw bounding boxes
     # Vehicles (green/orange/blue tones)
@@ -222,11 +261,14 @@ def _process_frame(
     # Violations (red tones) - thick border
     for viol in violations:
         color = violation_detector.get_color(viol.violation_type)
+        label = f"VP: {viol.violation_label} {viol.bbox.conf:.0%}"
+        if viol.plate_text:
+            label += f" ({viol.plate_text})"
         draw_bounding_box(
             annotated,
             int(viol.bbox.x1), int(viol.bbox.y1),
             int(viol.bbox.x2), int(viol.bbox.y2),
-            f"VP: {viol.violation_label} {viol.bbox.conf:.0%}", color,
+            label, color,
             thickness=3,
         )
 
@@ -485,17 +527,13 @@ async def analyze_image(file: UploadFile = File(...)):
 
     # Save violations to DB
     saved_violation_ids = []
-    # Lấy biển số đầu tiên (nếu có) để gắn vào vi phạm
-    first_plate = ""
-    if result.get("plates"):
-        first_plate = result["plates"][0].get("plate_text", "")
-
     for viol in result.get("violations", []):
         viol_id = await create_violation(ViolationCreate(
             violation_type=viol["violation_type"],
             violation_label=viol["violation_label"],
             confidence=viol["bbox"]["conf"],
-            plate_text=first_plate or None,
+            plate_text=viol.get("plate_text") or None,
+            vehicle_class=viol.get("vehicle_class") or None,
             camera_id="UPLOAD_IMG",
             source_type="image",
             source_file=file.filename,
@@ -717,27 +755,21 @@ async def _analyze_video_task(job_id: str, video_path: str):
 
                 # Save violations
                 if result.get("violations"):
-                    first_plate = ""
-                    if result.get("plates"):
-                        first_plate = result["plates"][0].get("plate_text", "")
-
-                    seen_types = set()
                     for viol in result["violations"]:
-                        if viol["violation_type"] not in seen_types:
-                            evidence_path = save_evidence(
-                                frame, f"{job_id}_{processed}_viol_{viol['violation_type']}"
-                            )
-                            await create_violation(ViolationCreate(
-                                violation_type=viol["violation_type"],
-                                violation_label=viol["violation_label"],
-                                confidence=viol["bbox"]["conf"],
-                                plate_text=first_plate or None,
-                                camera_id="UPLOAD",
-                                source_type="upload",
-                                source_file=Path(video_path).name,
-                                evidence_path=evidence_path,
-                            ))
-                            seen_types.add(viol["violation_type"])
+                        evidence_path = save_evidence(
+                            frame, f"{job_id}_{processed}_viol_{viol['violation_type']}"
+                        )
+                        await create_violation(ViolationCreate(
+                            violation_type=viol["violation_type"],
+                            violation_label=viol["violation_label"],
+                            confidence=viol["bbox"]["conf"],
+                            plate_text=viol.get("plate_text") or None,
+                            vehicle_class=viol.get("vehicle_class") or None,
+                            camera_id="UPLOAD",
+                            source_type="upload",
+                            source_file=Path(video_path).name,
+                            evidence_path=evidence_path,
+                        ))
 
             # Broadcast via WebSocket
             await manager.broadcast({
@@ -955,26 +987,20 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
 
                 # Save violations
                 if result.get("violations"):
-                    first_plate = ""
-                    if result.get("plates"):
-                        first_plate = result["plates"][0].get("plate_text", "")
-
-                    seen_types = set()
                     for viol in result["violations"]:
-                        if viol["violation_type"] not in seen_types:
-                            evidence_path = save_evidence(
-                                frame, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
-                            )
-                            await create_violation(ViolationCreate(
-                                violation_type=viol["violation_type"],
-                                violation_label=viol["violation_label"],
-                                confidence=viol["bbox"]["conf"],
-                                plate_text=first_plate or None,
-                                camera_id=camera_id,
-                                source_type="stream",
-                                evidence_path=evidence_path,
-                            ))
-                            seen_types.add(viol["violation_type"])
+                        evidence_path = save_evidence(
+                            frame, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
+                        )
+                        await create_violation(ViolationCreate(
+                            violation_type=viol["violation_type"],
+                            violation_label=viol["violation_label"],
+                            confidence=viol["bbox"]["conf"],
+                            plate_text=viol.get("plate_text") or None,
+                            vehicle_class=viol.get("vehicle_class") or None,
+                            camera_id=camera_id,
+                            source_type="stream",
+                            evidence_path=evidence_path,
+                        ))
 
             await asyncio.sleep(0.01)
 

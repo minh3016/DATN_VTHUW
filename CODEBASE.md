@@ -68,6 +68,7 @@ backend/
 | GET | `/api/cameras` | Danh sách cameras |
 | POST | `/api/cameras` | Thêm camera MJPEG |
 | DELETE | `/api/cameras/{id}` | Dừng & xóa camera |
+| GET | `/api/cameras/{id}/status` | Trạng thái chi tiết của camera (online, offline, reconnecting...) |
 | GET | `/api/detections` | Danh sách phát hiện xe (paginated) |
 | DELETE | `/api/detections/{id}` | Xóa phát hiện |
 | GET | `/api/stats` | Thống kê phân loại xe (24h) |
@@ -80,6 +81,9 @@ backend/
 | POST | `/api/upload/{id}/analyze` | Bắt đầu phân tích video |
 | GET | `/api/upload/{id}/status` | Trạng thái phân tích |
 | GET | `/api/evidence/{path}` | Serve evidence image |
+| POST | `/api/stream/start` | Bắt đầu stream & xử lý camera MJPEG trong background |
+| POST | `/api/stream/stop` | Dừng stream camera MJPEG |
+| GET | `/api/stream/status` | Danh sách các streams đang hoạt động và cấu hình chi tiết |
 | WS | `/ws/{camera_id}` | Stream phân tích realtime |
 
 ## Frontend Structure
@@ -96,11 +100,43 @@ frontend/src/
 │   ├── ViolationHistory.vue      # Violation list + filter + evidence modal
 │   └── DetectionHistory.vue      # Vehicle detection history
 ├── components/
-│   ├── DetectionTable.vue        # Recent detections table
-│   ├── DetectionFeed.vue         # Realtime detection feed
-│   ├── VideoStream.vue           # MJPEG stream viewer
-│   └── VideoUploader.vue         # Video file uploader
+│   ├── DetectionTable.vue        # Bảng lịch sử phát hiện xe
+│   ├── DetectionFeed.vue         # Realtime detection feed (dạng timeline)
+│   ├── VideoStream.vue           # MJPEG stream viewer (ESP32 / Webcam / Video File)
+│   ├── VideoUploader.vue         # Video file uploader
+│   ├── ROIEditor.vue             # Giao diện cấu hình Stop Line, số làn và hướng đi
+│   └── ViolationTable.vue        # Bảng quản lý danh sách vi phạm gần đây
 ```
+
+## Các tính năng mới & Trạng thái tích hợp
+
+Dự án hiện có một số component và tính năng mới đã được cài đặt và phát triển cấu trúc nhưng đang ở trạng thái tích hợp hoặc cần hoàn thiện kết nối:
+
+### 1. Cấu hình vạch dừng (Stop Line - ROI)
+- **Component**: [ROIEditor.vue](file:///m:/Free_DATN/DATN_VTHUW/frontend/src/components/ROIEditor.vue)
+- **Chức năng**: Cung cấp canvas trực quan để đặt vạch dừng (Y coordinate), phân chia làn đường (lane dividers) và chỉ hướng di chuyển.
+- **Trạng thái**: UI và logic vẽ canvas đã hoàn thiện. Tuy nhiên, tính năng này chưa được nhúng vào các view chính (`Dashboard.vue` hay `UploadAnalysis.vue`). API lưu/tải cấu hình ROI ở backend cũng chưa được triển khai hoàn chỉnh.
+
+### 2. Bảng quản lý vi phạm (Violation Table)
+- **Component**: [ViolationTable.vue](file:///m:/Free_DATN/DATN_VTHUW/frontend/src/components/ViolationTable.vue)
+- **Chức năng**: Hiển thị bảng vi phạm chi tiết với thời gian, loại vi phạm, camera, biển số (nếu có), ảnh thu nhỏ (thumbnail) và nút xóa vi phạm. Hỗ trợ xem ảnh bằng chứng qua Modal và phân trang tự động.
+- **Trạng thái**: Đã viết xong và kết nối với các API thực tế (`getViolations`, `deleteViolation`). Tuy nhiên, hiện tại chưa được import và sử dụng tại các view (ví dụ: `Dashboard.vue` hay `ViolationHistory.vue` đang dùng các bảng render thủ công riêng lẻ thay vì component dùng chung này).
+
+### 3. Stream realtime & Dòng phát hiện trực tiếp
+- **Component**: [VideoStream.vue](file:///m:/Free_DATN/DATN_VTHUW/frontend/src/components/VideoStream.vue) & [DetectionFeed.vue](file:///m:/Free_DATN/DATN_VTHUW/frontend/src/components/DetectionFeed.vue)
+- **Chức năng**: `VideoStream.vue` kết nối luồng MJPEG từ camera (ESP32-CAM/Webcam) qua WebSocket hiển thị bounding box realtime. `DetectionFeed.vue` hiển thị danh sách phương tiện phát hiện realtime dạng trượt động.
+- **Trạng thái**: Cả hai component đã hoàn thiện logic WebSocket và hiển thị nhưng hiện chưa được nhúng trực tiếp vào Sidebar hay Dashboard chính.
+
+### 4. Bổ sung API Client (`frontend/src/api/index.js`)
+- Component `VideoStream.vue` có import `addCamera` và `removeCamera` từ `@/api/index.js`, tuy nhiên 2 hàm này hiện **chưa được định nghĩa** trong API client của frontend. Cần bổ sung vào [index.js](file:///m:/Free_DATN/DATN_VTHUW/frontend/src/api/index.js) các hàm sau để tránh lỗi Runtime khi sử dụng stream:
+  ```javascript
+  export const addCamera = (mjpegUrl, cameraId, location = null, frameSkip = 2, reconnect = true) =>
+    api.post('/api/stream/start', { mjpeg_url: mjpegUrl, camera_id: cameraId, location, frame_skip: frameSkip, reconnect })
+
+  export const removeCamera = (cameraId) =>
+    api.post('/api/stream/stop', {}, { params: { camera_id: cameraId } })
+  ```
+
 
 ## Database Collections
 

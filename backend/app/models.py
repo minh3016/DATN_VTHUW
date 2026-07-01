@@ -52,12 +52,21 @@ class ViolationDetection(BaseModel):
     violation_type: str      # "no_seatbelt" | "using_phone" | "no_helmet"
     violation_label: str     # "Không thắt dây an toàn" | "Sử dụng điện thoại" | "Không đội MBH"
     is_violation: bool = True  # True = vi phạm, False = hợp lệ
+    vehicle_class: Optional[str] = None
+    plate_text: Optional[str] = None
+
+
+class CharDetection(BaseModel):
+    """Kết quả phát hiện ký tự trên biển số"""
+    char: str
+    bbox: BoundingBox
 
 
 class PlateDetection(BaseModel):
     """Kết quả phát hiện và nhận diện biển số xe"""
     bbox: BoundingBox
     plate_text: str = ""                   # Biển số đã nhận diện (e.g. "51A12345")
+    char_boxes: List[CharDetection] = []   # Bounding box của từng ký tự OCR
     char_confidences: List[float] = []     # Confidence của từng ký tự OCR
     avg_ocr_confidence: float = 0.0        # Confidence trung bình OCR
     plate_image_base64: Optional[str] = None  # Ảnh crop biển số (base64)
