@@ -200,25 +200,19 @@ def _process_frame(
         vehicles = vehicle_detector.detect(frame)
 
     violations = []
+    if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
+        violations = violation_detector.detect(frame, violations_only=True)
+
     plates = []
+    if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
+        plates = plate_recognizer.detect_plates(frame)
 
-    # Tối ưu hóa: Bỏ qua phát hiện vi phạm và biển số nếu không phát hiện xe nào
-    should_process = len(vehicles) > 0 or not ENABLE_VEHICLE_DETECTION
+    # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng
+    from .utils.image_utils import calculate_containment_ratio
 
-    if should_process:
-        # ② Violation Detection
-        if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
-            violations = violation_detector.detect(frame, violations_only=True)
-
-        # ③ Plate Recognition
-        if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
-            plates = plate_recognizer.detect_plates(frame)
-
-        # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng
-        from .utils.image_utils import calculate_containment_ratio
-
-        # Ánh xạ vehicle_idx -> plate_text
-        vehicle_to_plate = {}
+    # Ánh xạ vehicle_idx -> plate_text
+    vehicle_to_plate = {}
+    if vehicles and plates:
         for plate in plates:
             best_idx = -1
             best_ratio = 0.0
@@ -232,8 +226,9 @@ def _process_frame(
             if best_idx != -1 and best_ratio > 0.25:
                 vehicle_to_plate[best_idx] = plate.plate_text
 
-        # Cập nhật vehicle_class và plate_text cho từng vi phạm
-        for viol in violations:
+    # Cập nhật vehicle_class và plate_text cho từng vi phạm
+    for viol in violations:
+        if vehicles:
             best_idx = -1
             best_ratio = 0.0
             viol_box = (viol.bbox.x1, viol.bbox.y1, viol.bbox.x2, viol.bbox.y2)
@@ -247,6 +242,16 @@ def _process_frame(
                 matching_vehicle = vehicles[best_idx]
                 viol.vehicle_class = matching_vehicle.class_name
                 viol.plate_text = vehicle_to_plate.get(best_idx)
+
+        # Hậu xử lý dự phòng: Nếu không khớp được với xe nào (hoặc không phát hiện được xe)
+        # Tự động gán loại xe mặc định dựa theo loại vi phạm để đảm bảo dữ liệu đầu ra chính xác
+        if not viol.vehicle_class:
+            if viol.violation_type == "no_helmet":
+                viol.vehicle_class = "motorcycle"
+            elif viol.violation_type == "no_seatbelt":
+                viol.vehicle_class = "car"
+            else:
+                viol.vehicle_class = "motorcycle"  # Default fallback cho using_phone/khác
 
     # ④ Draw bounding boxes
     # Vehicles (green/orange/blue tones)
