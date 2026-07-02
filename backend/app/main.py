@@ -60,6 +60,7 @@ from .config import (
     CORS_ORIGINS, FRAME_WIDTH, FRAME_HEIGHT, PROCESS_FPS,
     EVIDENCE_DIR, UPLOAD_DIR, MAX_UPLOAD_DURATION_SEC, MAX_UPLOAD_SIZE_MB,
     ENABLE_VEHICLE_DETECTION, ENABLE_VIOLATION_DETECTION, ENABLE_PLATE_RECOGNITION,
+    ENABLE_ROI, ROI_X1, ROI_Y1, ROI_X2, ROI_Y2,
 )
 from .database import (
     connect_to_mongo,
@@ -194,6 +195,36 @@ def _process_frame(
     t0 = time.time()
     annotated = frame.copy()
 
+    # Định nghĩa kiểm tra xem hộp bao có nằm trong vùng ROI hay không
+    def is_box_inside_roi(box) -> bool:
+        if not ENABLE_ROI:
+            return True
+        x1_v, y1_v, x2_v, y2_v = box
+        # Điểm tiếp xúc chân đế phương tiện với mặt đường (Bottom center)
+        xc = (x1_v + x2_v) / 2.0
+        yc = y2_v
+        if (ROI_X1 <= xc <= ROI_X2) and (ROI_Y1 <= yc <= ROI_Y2):
+            return True
+        # Điểm trung tâm hình học (Centroid fallback)
+        yc_center = (y1_v + y2_v) / 2.0
+        if (ROI_X1 <= xc <= ROI_X2) and (ROI_Y1 <= yc_center <= ROI_Y2):
+            return True
+        return False
+
+    # Vẽ khung giới hạn vùng phát hiện (ROI Box) lên màn hình
+    if ENABLE_ROI:
+        cv2.rectangle(annotated, (ROI_X1, ROI_Y1), (ROI_X2, ROI_Y2), (0, 180, 255), 2)
+        cv2.putText(
+            annotated,
+            "KHU VUC PHAT HIEN (DETECTION ZONE)",
+            (ROI_X1 + 5, ROI_Y1 - 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 180, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
     # ① Vehicle Detection
     vehicles = []
     if ENABLE_VEHICLE_DETECTION and vehicle_detector.is_loaded:
@@ -207,17 +238,58 @@ def _process_frame(
     if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
         plates = plate_recognizer.detect_plates(frame)
 
-    # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng
+    # Phân loại đối tượng ở trong hay ngoài ROI
+    active_vehicles = []
+    for v in vehicles:
+        box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
+        if is_box_inside_roi(box):
+            active_vehicles.append(v)
+        else:
+            # Các xe ngoài khu vực được vẽ bằng nét xám nhạt và không được tính
+            draw_bounding_box(
+                annotated,
+                int(v.bbox.x1), int(v.bbox.y1), int(v.bbox.x2), int(v.bbox.y2),
+                f"{v.class_name} (ngoai vung)", (140, 140, 140),
+                thickness=1,
+            )
+
+    active_plates = []
+    for plate in plates:
+        box = (plate.bbox.x1, plate.bbox.y1, plate.bbox.x2, plate.bbox.y2)
+        if is_box_inside_roi(box):
+            active_plates.append(plate)
+        else:
+            draw_bounding_box(
+                annotated,
+                int(plate.bbox.x1), int(plate.bbox.y1), int(plate.bbox.x2), int(plate.bbox.y2),
+                "BS (ngoai vung)", (180, 180, 180),
+                thickness=1,
+            )
+
+    active_violations = []
+    for viol in violations:
+        box = (viol.bbox.x1, viol.bbox.y1, viol.bbox.x2, viol.bbox.y2)
+        if is_box_inside_roi(box):
+            active_violations.append(viol)
+        else:
+            draw_bounding_box(
+                annotated,
+                int(viol.bbox.x1), int(viol.bbox.y1), int(viol.bbox.x2), int(viol.bbox.y2),
+                f"VP: {viol.violation_label} (ngoai vung)", (140, 140, 140),
+                thickness=1,
+            )
+
+    # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng (chỉ với đối tượng trong ROI)
     from .utils.image_utils import calculate_containment_ratio
 
     # Ánh xạ vehicle_idx -> plate_text
     vehicle_to_plate = {}
-    if vehicles and plates:
-        for plate in plates:
+    if active_vehicles and active_plates:
+        for plate in active_plates:
             best_idx = -1
             best_ratio = 0.0
             p_box = (plate.bbox.x1, plate.bbox.y1, plate.bbox.x2, plate.bbox.y2)
-            for idx, v in enumerate(vehicles):
+            for idx, v in enumerate(active_vehicles):
                 v_box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
                 ratio = calculate_containment_ratio(p_box, v_box)
                 if ratio > best_ratio:
@@ -227,35 +299,34 @@ def _process_frame(
                 vehicle_to_plate[best_idx] = plate.plate_text
 
     # Cập nhật vehicle_class và plate_text cho từng vi phạm
-    for viol in violations:
-        if vehicles:
+    for viol in active_violations:
+        if active_vehicles:
             best_idx = -1
             best_ratio = 0.0
             viol_box = (viol.bbox.x1, viol.bbox.y1, viol.bbox.x2, viol.bbox.y2)
-            for idx, v in enumerate(vehicles):
+            for idx, v in enumerate(active_vehicles):
                 v_box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
                 ratio = calculate_containment_ratio(viol_box, v_box)
                 if ratio > best_ratio:
                     best_ratio = ratio
                     best_idx = idx
             if best_idx != -1 and best_ratio > 0.25:
-                matching_vehicle = vehicles[best_idx]
+                matching_vehicle = active_vehicles[best_idx]
                 viol.vehicle_class = matching_vehicle.class_name
                 viol.plate_text = vehicle_to_plate.get(best_idx)
 
-        # Hậu xử lý dự phòng: Nếu không khớp được với xe nào (hoặc không phát hiện được xe)
-        # Tự động gán loại xe mặc định dựa theo loại vi phạm để đảm bảo dữ liệu đầu ra chính xác
+        # Hậu xử lý dự phòng
         if not viol.vehicle_class:
             if viol.violation_type == "no_helmet":
                 viol.vehicle_class = "motorcycle"
             elif viol.violation_type == "no_seatbelt":
                 viol.vehicle_class = "car"
             else:
-                viol.vehicle_class = "motorcycle"  # Default fallback cho using_phone/khác
+                viol.vehicle_class = "motorcycle"
 
-    # ④ Draw bounding boxes
+    # ④ Vẽ các bounding boxes có hiệu lực (active trong ROI)
     # Vehicles (green/orange/blue tones)
-    for v in vehicles:
+    for v in active_vehicles:
         color = vehicle_detector.get_color(v.class_name)
         draw_bounding_box(
             annotated,
@@ -264,7 +335,7 @@ def _process_frame(
         )
 
     # Violations (red tones) - thick border
-    for viol in violations:
+    for viol in active_violations:
         color = violation_detector.get_color(viol.violation_type)
         label = f"VP: {viol.violation_label} {viol.bbox.conf:.0%}"
         if viol.plate_text:
@@ -278,7 +349,7 @@ def _process_frame(
         )
 
     # Plates (yellow)
-    for plate in plates:
+    for plate in active_plates:
         label = f"BS: {plate.plate_text}" if plate.plate_text else "Bien so"
         draw_bounding_box(
             annotated,
@@ -287,14 +358,14 @@ def _process_frame(
             label, (0, 255, 255),  # Yellow
         )
 
-    # ⑤ Count statistics
-    vehicle_count = len(vehicles)
-    violation_count = len(violations)
-    plate_count = len(plates)
+    # ⑤ Thống kê các đối tượng active
+    vehicle_count = len(active_vehicles)
+    violation_count = len(active_violations)
+    plate_count = len(active_plates)
 
-    counts_by_class = vehicle_detector.count_by_class(vehicles) if vehicles else {}
-    counts_by_category = vehicle_detector.count_by_category(vehicles) if vehicles else {}
-    counts_by_violation = violation_detector.count_by_type(violations) if violations else {}
+    counts_by_class = vehicle_detector.count_by_class(active_vehicles) if active_vehicles else {}
+    counts_by_category = vehicle_detector.count_by_category(active_vehicles) if active_vehicles else {}
+    counts_by_violation = violation_detector.count_by_type(active_violations) if active_violations else {}
 
     # ⑥ Overlay info
     fps = 1.0 / max(time.time() - t0, 0.001)
@@ -416,9 +487,25 @@ async def list_detections(
     vehicle_class: Optional[str] = None,
     category: Optional[str] = None,
     camera_id: Optional[str] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
 ):
-    detections = await get_detections(skip, limit, vehicle_class, category, camera_id)
-    total = await count_detections(vehicle_class, category, camera_id)
+    detections = await get_detections(
+        skip=skip,
+        limit=limit,
+        vehicle_class=vehicle_class,
+        category=category,
+        camera_id=camera_id,
+        source_file=source_file,
+        source_type=source_type
+    )
+    total = await count_detections(
+        vehicle_class=vehicle_class,
+        category=category,
+        camera_id=camera_id,
+        source_file=source_file,
+        source_type=source_type
+    )
     return {"detections": detections, "total": total, "skip": skip, "limit": limit}
 
 
@@ -441,11 +528,24 @@ async def list_violations(
     violation_type: Optional[str] = None,
     camera_id: Optional[str] = None,
     plate_text: Optional[str] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
 ):
     violations_list = await get_violations(
-        skip, limit, violation_type, camera_id, plate_text
+        skip=skip,
+        limit=limit,
+        violation_type=violation_type,
+        camera_id=camera_id,
+        plate_text=plate_text,
+        source_file=source_file,
+        source_type=source_type
     )
-    total = await count_violations(violation_type, camera_id)
+    total = await count_violations(
+        violation_type=violation_type,
+        camera_id=camera_id,
+        source_file=source_file,
+        source_type=source_type
+    )
     return {"violations": violations_list, "total": total, "skip": skip, "limit": limit}
 
 
@@ -611,6 +711,7 @@ async def upload_video(file: UploadFile = File(...)):
         file_size=file_size,
         duration_sec=duration_sec,
         total_frames=process_frames,
+        filepath=str(save_path),
     )
 
     return VideoUploadResponse(
@@ -632,32 +733,37 @@ async def start_analysis(job_id: str):
     if job.get("status") == "processing":
         raise HTTPException(400, "Already processing")
 
-    # Find the uploaded file
-    upload_files = list(UPLOAD_DIR.glob("*"))
-    video_path = None
-    for f in upload_files:
-        if f.stem.startswith(job_id[:12]) or f.name == job.get("filename"):
-            video_path = f
-            break
+    # Lấy đường dẫn file trực tiếp từ database đã lưu lúc upload để đảm bảo chính xác tuyệt đối
+    video_path = job.get("filepath")
 
-    # Try matching by any file if job_id was a DB ObjectId
-    if video_path is None:
+    # Dự phòng tìm kiếm tên file nếu trường filepath trống hoặc file bị di chuyển (tương thích ngược)
+    if not video_path or not Path(video_path).exists():
+        upload_files = list(UPLOAD_DIR.glob("*"))
+        video_path = None
         for f in upload_files:
-            if f.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv"}:
-                video_path = f
+            if f.stem.startswith(job_id[:12]) or f.name == job.get("filename"):
+                video_path = str(f)
                 break
+
+        if video_path is None:
+            for f in upload_files:
+                if f.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv"}:
+                    video_path = str(f)
+                    break
+    else:
+        video_path = str(video_path)
 
     if video_path is None:
         raise HTTPException(404, "Video file not found")
 
     # Start background task
     task = asyncio.create_task(
-        _analyze_video_task(job_id, str(video_path))
+        _analyze_video_task(job_id, video_path)
     )
     _analysis_tasks[job_id] = task
 
     await update_analysis_job(job_id, status="processing",
-                              started_at=datetime.utcnow())
+                               started_at=datetime.utcnow())
 
     return {"message": "Analysis started", "job_id": job_id}
 
@@ -693,6 +799,31 @@ async def _analyze_video_task(job_id: str, video_path: str):
         cumulative_by_category: dict = {}
         cumulative_by_violation: dict = {}
 
+        # Lịch sử theo dõi phục vụ khử trùng lặp (lưu giữ tối đa 15 frame processed ~ 5 giây)
+        recent_detections = []
+        recent_violations = []
+        unique_plates = set()
+
+        def calculate_overlap_score(box1, box2):
+            x1_1, y1_1, x2_1, y2_1 = box1
+            x1_2, y1_2, x2_2, y2_2 = box2
+            xi1 = max(x1_1, x1_2)
+            yi1 = max(y1_1, y1_2)
+            xi2 = min(x2_1, x2_2)
+            yi2 = min(y2_1, y2_2)
+            inter = max(0.0, xi2 - xi1) * max(0.0, yi2 - yi1)
+            if inter <= 0:
+                return 0.0
+            area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+            area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+            union = area1 + area2 - inter
+            iou = inter / union if union > 0 else 0.0
+
+            # Tính tỉ lệ bao chứa (containment ratio) để bắt kịp khi xe đi từ xa lại gần (kích thước box tăng mạnh)
+            min_area = min(area1, area2)
+            containment = inter / min_area if min_area > 0 else 0.0
+            return max(iou, containment)
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -720,61 +851,91 @@ async def _analyze_video_task(job_id: str, video_path: str):
             frame_vehicles = result.get("vehicle_count", 0)
             frame_violations = result.get("violation_count", 0)
             frame_plates = result.get("plate_count", 0)
-            vehicles_total += frame_vehicles
-            violations_total += frame_violations
-            plates_total += frame_plates
+
+            # Dọn dẹp dữ liệu theo dõi quá cũ (> 15 processed frames)
+            recent_detections = [d for d in recent_detections if processed - d["frame_idx"] <= 15]
+            recent_violations = [v for v in recent_violations if processed - v["frame_idx"] <= 15]
+
+            # Lưu phát hiện phương tiện (khử trùng lặp qua IOU + bao chứa)
+            for v in result.get("vehicles", []):
+                v_box = (v["bbox"]["x1"], v["bbox"]["y1"], v["bbox"]["x2"], v["bbox"]["y2"])
+                is_duplicate = False
+                for prev in recent_detections:
+                    if prev["class_name"] == v["class_name"]:
+                        if calculate_overlap_score(v_box, prev["bbox"]) > 0.45:
+                            is_duplicate = True
+                            break
+                if not is_duplicate:
+                    evidence_path = save_evidence(
+                        frame, f"{job_id}_{processed}_{v['class_name']}"
+                    )
+                    await create_detection(DetectionCreate(
+                        vehicle_class=v["class_name"],
+                        category=v["category"],
+                        confidence=v["bbox"]["conf"],
+                        camera_id="UPLOAD",
+                        source_type="upload",
+                        source_file=Path(video_path).name,
+                        evidence_path=evidence_path,
+                    ))
+                    recent_detections.append({
+                        "bbox": v_box,
+                        "class_name": v["class_name"],
+                        "frame_idx": processed
+                    })
+                    vehicles_total += 1
+                    cumulative_by_class[v["class_name"]] = cumulative_by_class.get(v["class_name"], 0) + 1
+                    cumulative_by_category[v["category"]] = cumulative_by_category.get(v["category"], 0) + 1
+
+            # Lưu các vi phạm phát hiện được (khử trùng lặp qua IOU + bao chứa và biển số)
+            for viol in result.get("violations", []):
+                viol_box = (viol["bbox"]["x1"], viol["bbox"]["y1"], viol["bbox"]["x2"], viol["bbox"]["y2"])
+                p_text = viol.get("plate_text") or ""
+                is_duplicate = False
+                for prev in recent_violations:
+                    if prev["violation_type"] == viol["violation_type"]:
+                        if p_text and prev["plate_text"] and p_text == prev["plate_text"]:
+                            is_duplicate = True
+                            break
+                        if calculate_overlap_score(viol_box, prev["bbox"]) > 0.45:
+                            is_duplicate = True
+                            break
+                if not is_duplicate:
+                    evidence_path = save_evidence(
+                        frame, f"{job_id}_{processed}_viol_{viol['violation_type']}"
+                    )
+                    await create_violation(ViolationCreate(
+                        violation_type=viol["violation_type"],
+                        violation_label=viol["violation_label"],
+                        confidence=viol["bbox"]["conf"],
+                        plate_text=viol.get("plate_text") or None,
+                        vehicle_class=viol.get("vehicle_class") or None,
+                        camera_id="UPLOAD",
+                        source_type="upload",
+                        source_file=Path(video_path).name,
+                        evidence_path=evidence_path,
+                    ))
+                    recent_violations.append({
+                        "bbox": viol_box,
+                        "violation_type": viol["violation_type"],
+                        "plate_text": p_text,
+                        "frame_idx": processed
+                    })
+                    violations_total += 1
+                    cumulative_by_violation[viol["violation_type"]] = cumulative_by_violation.get(viol["violation_type"], 0) + 1
+
+            # Thống kê lượng biển số xe độc nhất trong video
+            for plate in result.get("plates", []):
+                p_text = (plate.get("plate_text") or "").strip().upper()
+                if p_text and len(p_text) >= 4 and p_text not in unique_plates:
+                    unique_plates.add(p_text)
+                    plates_total += 1
 
             # Debug log every 30 frames
             if processed % 30 == 0:
                 logger.info(f"  Frame {processed}: {frame_vehicles} vehicles, "
-                             f"{frame_violations} violations, {frame_plates} plates")
-
-            # Accumulate counts
-            for cls, cnt in result.get("counts_by_class", {}).items():
-                cumulative_by_class[cls] = cumulative_by_class.get(cls, 0) + cnt
-            for cat, cnt in result.get("counts_by_category", {}).items():
-                cumulative_by_category[cat] = cumulative_by_category.get(cat, 0) + cnt
-            for vtype, cnt in result.get("counts_by_violation", {}).items():
-                cumulative_by_violation[vtype] = cumulative_by_violation.get(vtype, 0) + cnt
-
-            # Save detections + violations to DB (sample – every 30 frames)
-            if processed % 30 == 0:
-                # Save vehicle detections
-                if result.get("vehicles"):
-                    seen_classes = set()
-                    for v in result["vehicles"]:
-                        if v["class_name"] not in seen_classes:
-                            evidence_path = save_evidence(
-                                frame, f"{job_id}_{processed}_{v['class_name']}"
-                            )
-                            await create_detection(DetectionCreate(
-                                vehicle_class=v["class_name"],
-                                category=v["category"],
-                                confidence=v["bbox"]["conf"],
-                                camera_id="UPLOAD",
-                                source_type="upload",
-                                source_file=Path(video_path).name,
-                                evidence_path=evidence_path,
-                            ))
-                            seen_classes.add(v["class_name"])
-
-                # Save violations
-                if result.get("violations"):
-                    for viol in result["violations"]:
-                        evidence_path = save_evidence(
-                            frame, f"{job_id}_{processed}_viol_{viol['violation_type']}"
-                        )
-                        await create_violation(ViolationCreate(
-                            violation_type=viol["violation_type"],
-                            violation_label=viol["violation_label"],
-                            confidence=viol["bbox"]["conf"],
-                            plate_text=viol.get("plate_text") or None,
-                            vehicle_class=viol.get("vehicle_class") or None,
-                            camera_id="UPLOAD",
-                            source_type="upload",
-                            source_file=Path(video_path).name,
-                            evidence_path=evidence_path,
-                        ))
+                             f"{frame_violations} violations, {frame_plates} plates. "
+                             f"Total Unique: {vehicles_total} vehicles, {violations_total} violations, {plates_total} plates.")
 
             # Broadcast via WebSocket
             await manager.broadcast({

@@ -77,3 +77,4 @@ data/db/
 
 # ── Gemini / Antigravity ─────────────────────────────
 .gemini/
+*.mp4

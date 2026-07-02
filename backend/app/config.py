@@ -69,3 +69,11 @@ CORS_ORIGINS: list = os.getenv(
 
 # ── WebSocket ─────────────────────────────────────────────────
 WS_HEARTBEAT_INTERVAL: int = int(os.getenv("WS_HEARTBEAT_INTERVAL", "30"))
+
+# ── Region of Interest (ROI) ──
+# Khu vực phát hiện mặc định trên khung hình 1280x720
+ENABLE_ROI: bool = os.getenv("ENABLE_ROI", "true").lower() == "true"
+ROI_X1: int = int(os.getenv("ROI_X1", "100"))
+ROI_Y1: int = int(os.getenv("ROI_Y1", "180"))
+ROI_X2: int = int(os.getenv("ROI_X2", "1180"))
+ROI_Y2: int = int(os.getenv("ROI_Y2", "700"))

@@ -66,92 +66,103 @@
       <!-- Image Result -->
       <div v-if="imageResult" class="result-section animate-fade-in">
         <div class="result-header">
-          <h2>Ket qua phan tich</h2>
-          <button class="btn btn--ghost" @click="resetAll">Upload anh moi</button>
+          <h2>Kết quả phân tích hình ảnh</h2>
+          <button class="btn btn--ghost" @click="resetAll">Upload ảnh mới</button>
         </div>
 
-        <!-- Annotated image -->
-        <div class="annotated-wrap">
-          <img
-            v-if="imageResult.frame_base64"
-            :src="`data:image/jpeg;base64,${imageResult.frame_base64}`"
-            alt="Annotated"
-            class="annotated-img"
-          />
-        </div>
+        <div class="results-split-layout">
+          <!-- Cột bên trái: Ảnh và KPI -->
+          <div class="results-visuals-col">
+            <!-- Annotated image -->
+            <div class="annotated-wrap">
+              <img
+                v-if="imageResult.frame_base64"
+                :src="`data:image/jpeg;base64,${imageResult.frame_base64}`"
+                alt="Annotated"
+                class="annotated-img"
+              />
+            </div>
 
-        <!-- Stats cards -->
-        <div class="result-stats">
-          <div class="rs-card rs-card--blue">
-            <span class="rs-icon">🚗</span>
-            <span class="rs-val">{{ imageResult.vehicle_count || 0 }}</span>
-            <span class="rs-label">Phương tiện</span>
-          </div>
-          <div class="rs-card rs-card--red">
-            <span class="rs-icon">⚠️</span>
-            <span class="rs-val">{{ imageResult.violation_count || 0 }}</span>
-            <span class="rs-label">Vi phạm</span>
-          </div>
-          <div class="rs-card rs-card--yellow">
-            <span class="rs-icon">🔢</span>
-            <span class="rs-val">{{ imageResult.plate_count || 0 }}</span>
-            <span class="rs-label">Biển số</span>
-          </div>
-          <div
-            v-for="(cnt, cls) in (imageResult.counts_by_class || {})" :key="cls"
-            class="rs-card" :class="`rs-card--${cls}`"
-          >
-            <span class="rs-icon">{{ classIcon(cls) }}</span>
-            <span class="rs-val">{{ cnt }}</span>
-            <span class="rs-label">{{ classLabel(cls) }}</span>
-          </div>
-        </div>
+            <!-- Stats cards -->
+            <div class="result-stats">
+              <div class="rs-card rs-card--blue">
+                <span class="rs-icon">🚗</span>
+                <span class="rs-val">{{ imageResult.vehicle_count || 0 }}</span>
+                <span class="rs-label">Phương tiện</span>
+              </div>
+              <div class="rs-card rs-card--red">
+                <span class="rs-icon">⚠️</span>
+                <span class="rs-val">{{ imageResult.violation_count || 0 }}</span>
+                <span class="rs-label">Vi phạm</span>
+              </div>
+              <div class="rs-card rs-card--yellow">
+                <span class="rs-icon">🔢</span>
+                <span class="rs-val">{{ imageResult.plate_count || 0 }}</span>
+                <span class="rs-label">Biển số</span>
+              </div>
+              <div
+                v-for="(cnt, cls) in (imageResult.counts_by_class || {})" :key="cls"
+                class="rs-card" :class="`rs-card--${cls}`"
+              >
+                <span class="rs-icon">{{ classIcon(cls) }}</span>
+                <span class="rs-val">{{ cnt }}</span>
+                <span class="rs-label">{{ classLabel(cls) }}</span>
+              </div>
+            </div>
 
-        <!-- Category breakdown -->
-        <div v-if="imageResult.counts_by_category" class="category-row">
-          <div
-            v-for="(cnt, cat) in imageResult.counts_by_category" :key="cat"
-            class="cat-chip" :class="`cat-chip--${cat}`"
-          >
-            <span class="cat-name">{{ catLabel(cat) }}</span>
-            <span class="cat-count">{{ cnt }}</span>
-          </div>
-        </div>
-
-        <!-- Vehicle detection list -->
-        <div v-if="imageResult.vehicles?.length" class="detections-list">
-          <h3>🚗 Phuong tien phat hien</h3>
-          <div class="det-grid">
-            <div v-for="(v, i) in imageResult.vehicles" :key="i" class="det-item" :class="`det-item--${v.category}`">
-              <span class="det-idx">{{ i + 1 }}</span>
-              <span class="badge" :class="classBadge(v.class_name)">{{ classIcon(v.class_name) }} {{ classLabel(v.class_name) }}</span>
-              <span class="det-conf mono">{{ (v.bbox.conf * 100).toFixed(0) }}%</span>
-              <span class="det-cat">{{ catLabel(v.category) }}</span>
+            <!-- Category breakdown -->
+            <div v-if="imageResult.counts_by_category" class="category-row">
+              <div
+                v-for="(cnt, cat) in imageResult.counts_by_category" :key="cat"
+                class="cat-chip" :class="`cat-chip--${cat}`"
+              >
+                <span class="cat-name">{{ catLabel(cat) }}</span>
+                <span class="cat-count">{{ cnt }}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Violations list -->
-        <div v-if="imageResult.violations?.length" class="detections-list violations-list">
-          <h3>⚠️ Vi pham giao thong</h3>
-          <div class="det-grid">
-            <div v-for="(viol, i) in imageResult.violations" :key="'v'+i" class="det-item det-item--violation">
-              <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
-              <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
-              <span class="det-conf mono">{{ (viol.bbox.conf * 100).toFixed(0) }}%</span>
+          <!-- Cột bên phải: Danh sách chi tiết phát hiện -->
+          <div class="results-lists-col">
+            <!-- Violations list -->
+            <div v-if="imageResult.violations?.length" class="detections-list violations-list">
+              <h3>⚠️ Vi phạm giao thông phát hiện</h3>
+              <div class="det-grid">
+                <div v-for="(viol, i) in imageResult.violations" :key="'v'+i" class="det-item det-item--violation" style="display:flex; align-items:center; justify-content:space-between;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
+                    <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
+                    <span class="det-conf mono">{{ (viol.bbox.conf * 100).toFixed(0) }}%</span>
+                  </div>
+                  <span v-if="viol.plate_text" class="plate-text-lg" style="font-size:0.8rem; padding:2px 6px;">{{ viol.plate_text }}</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Plates list -->
-        <div v-if="imageResult.plates?.length" class="detections-list plates-list">
-          <h3>🔢 Bien so xe nhan dien</h3>
-          <div class="det-grid">
-            <div v-for="(plate, i) in imageResult.plates" :key="'p'+i" class="det-item det-item--plate">
-              <span class="det-idx det-idx--plate">{{ i + 1 }}</span>
-              <span class="plate-text-lg">{{ plate.plate_text || 'Không nhận diện được' }}</span>
-              <span class="det-conf mono">{{ plate.avg_ocr_confidence ? (plate.avg_ocr_confidence * 100).toFixed(0) + '%' : '—' }}</span>
-              <img v-if="plate.plate_image_base64" :src="'data:image/jpeg;base64,' + plate.plate_image_base64" class="plate-thumb" alt="plate" />
+            <!-- Plates list -->
+            <div v-if="imageResult.plates?.length" class="detections-list plates-list">
+              <h3>🔢 Biển số xe nhận diện</h3>
+              <div class="det-grid">
+                <div v-for="(plate, i) in imageResult.plates" :key="'p'+i" class="det-item det-item--plate">
+                  <span class="det-idx det-idx--plate">{{ i + 1 }}</span>
+                  <span class="plate-text-lg">{{ plate.plate_text || 'Không nhận dạng' }}</span>
+                  <span class="det-conf mono">{{ plate.avg_ocr_confidence ? (plate.avg_ocr_confidence * 100).toFixed(0) + '%' : '—' }}</span>
+                  <img v-if="plate.plate_image_base64" :src="'data:image/jpeg;base64,' + plate.plate_image_base64" class="plate-thumb" alt="plate" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Vehicle detection list -->
+            <div v-if="imageResult.vehicles?.length" class="detections-list">
+              <h3>🚗 Phương tiện phát hiện trong ROI</h3>
+              <div class="det-grid">
+                <div v-for="(v, i) in imageResult.vehicles" :key="i" class="det-item" :class="`det-item--${v.category}`">
+                  <span class="det-idx">{{ i + 1 }}</span>
+                  <span class="badge" :class="classBadge(v.class_name)">{{ classIcon(v.class_name) }} {{ classLabel(v.class_name) }}</span>
+                  <span class="det-conf mono">{{ (v.bbox.conf * 100).toFixed(0) }}%</span>
+                  <span class="det-cat" style="margin-left:auto;">{{ catLabel(v.category) }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -204,25 +215,95 @@
 
         <!-- Video results -->
         <div v-if="jobStatus?.status === 'completed'" class="result-section animate-fade-in">
-          <h2>Ket qua phan tich video</h2>
-          <div class="result-stats">
-            <div class="rs-card rs-card--blue"><span class="rs-icon">🚗</span><span class="rs-val">{{ jobStatus.vehicles_detected }}</span><span class="rs-label">Phuong tien</span></div>
-            <div class="rs-card rs-card--red"><span class="rs-icon">⚠️</span><span class="rs-val">{{ jobStatus.violations_detected || 0 }}</span><span class="rs-label">Vi pham</span></div>
-            <div class="rs-card rs-card--yellow"><span class="rs-icon">🔢</span><span class="rs-val">{{ jobStatus.plates_detected || 0 }}</span><span class="rs-label">Bien so</span></div>
-            <div class="rs-card rs-card--car"><span class="rs-icon">Oto</span><span class="rs-val">{{ jobStatus.counts_by_category?.oto||0 }}</span><span class="rs-label">Xe o to</span></div>
-            <div class="rs-card rs-card--motorcycle"><span class="rs-icon">Moto</span><span class="rs-val">{{ jobStatus.counts_by_category?.xe_may||0 }}</span><span class="rs-label">Xe may</span></div>
+          <div class="result-header">
+            <h2>Kết quả phân tích video</h2>
+            <button class="btn btn--ghost" @click="resetAll">Upload video mới</button>
           </div>
-          <div v-if="jobStatus.counts_by_violation" class="category-row" style="margin-top:12px">
-            <span v-for="(cnt, vtype) in jobStatus.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype" style="padding:6px 14px;font-size:0.85rem">
-              {{ violLabel(vtype) }}: {{ cnt }}
-            </span>
+
+          <div class="results-split-layout">
+            <!-- Cột bên trái: Thống kê & Biểu đồ sơ lược -->
+            <div class="results-visuals-col">
+              <div class="result-stats" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));">
+                <div class="rs-card rs-card--blue"><span class="rs-icon">🚗</span><span class="rs-val">{{ jobStatus.vehicles_detected }}</span><span class="rs-label">Phương tiện</span></div>
+                <div class="rs-card rs-card--red"><span class="rs-icon">⚠️</span><span class="rs-val">{{ jobStatus.violations_detected || 0 }}</span><span class="rs-label">Vi phạm</span></div>
+                <div class="rs-card rs-card--yellow"><span class="rs-icon">🔢</span><span class="rs-val">{{ jobStatus.plates_detected || 0 }}</span><span class="rs-label">Biển số</span></div>
+              </div>
+
+              <div class="result-stats" style="grid-template-columns: 1fr 1fr; margin-top: 0;">
+                <div class="rs-card rs-card--car"><span class="rs-icon">Oto</span><span class="rs-val">{{ jobStatus.counts_by_category?.oto||0 }}</span><span class="rs-label">Xe ô tô</span></div>
+                <div class="rs-card rs-card--motorcycle"><span class="rs-icon">Moto</span><span class="rs-val">{{ jobStatus.counts_by_category?.xe_may||0 }}</span><span class="rs-label">Xe máy</span></div>
+              </div>
+
+              <div v-if="jobStatus.counts_by_violation" class="category-row" style="margin-top:10px">
+                <span v-for="(cnt, vtype) in jobStatus.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype" style="padding:6px 14px;font-size:0.85rem">
+                  {{ violLabel(vtype) }}: {{ cnt }}
+                </span>
+              </div>
+              <div v-if="jobStatus.counts_by_class" class="category-row" style="margin-top:4px">
+                <span v-for="(cnt, cls) in jobStatus.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)" style="padding:6px 14px;font-size:0.85rem">
+                  {{ classIcon(cls) }} {{ classLabel(cls) }}: {{ cnt }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Cột bên phải: Danh sách phát hiện chi tiết -->
+            <div class="results-lists-col">
+              <!-- Video Violations -->
+              <div v-if="videoViolations.length" class="detections-list violations-list">
+                <h3>⚠️ Danh sách vi phạm phát hiện</h3>
+                <div class="det-grid">
+                  <div v-for="(viol, i) in videoViolations" :key="'vv'+i" class="det-item det-item--violation" style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                      <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
+                      <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
+                      <span class="det-conf mono">{{ (viol.confidence * 100).toFixed(0) }}%</span>
+                      <span v-if="viol.plate_text" class="plate-text-lg" style="font-size: 0.85rem; padding: 2px 6px;">{{ viol.plate_text }}</span>
+                      <span class="badge badge--primary" style="font-size: 0.75rem;">{{ classLabel(viol.vehicle_class) }}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <img v-if="viol.evidence_path" :src="getEvidenceUrl(viol.evidence_path)" class="plate-thumb" style="height: 48px; width: 80px; object-fit: cover; cursor: pointer; border-radius: 4px;" @click="showVideoEvidence(viol)" title="Xem ảnh bằng chứng" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Video Vehicles -->
+              <div v-if="videoDetections.length" class="detections-list">
+                <h3>🚗 Danh sách phương tiện phát hiện</h3>
+                <div class="det-grid">
+                  <div v-for="(v, i) in videoDetections" :key="'vd'+i" class="det-item" :class="`det-item--${v.category}`" style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                      <span class="det-idx">{{ i + 1 }}</span>
+                      <span class="badge" :class="classBadge(v.vehicle_class)">{{ classIcon(v.vehicle_class) }} {{ classLabel(v.vehicle_class) }}</span>
+                      <span class="det-conf mono">{{ (v.confidence * 100).toFixed(0) }}%</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <img v-if="v.evidence_path" :src="getEvidenceUrl(v.evidence_path)" class="plate-thumb" style="height: 48px; width: 80px; object-fit: cover; cursor: pointer; border-radius: 4px;" @click="showVideoEvidence(v)" title="Xem ảnh phương tiện" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-if="jobStatus.counts_by_class" class="category-row" style="margin-top:8px">
-            <span v-for="(cnt, cls) in jobStatus.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)" style="padding:6px 14px;font-size:0.85rem">
-              {{ classIcon(cls) }} {{ classLabel(cls) }}: {{ cnt }}
-            </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Evidence Modal -->
+    <div v-if="evidenceModalItem" class="modal-overlay" @click.self="evidenceModalItem = null">
+      <div class="modal-content" style="max-width: 700px; width: 90%; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-xl); overflow: hidden;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 1px solid var(--border-color);">
+          <h3 style="margin: 0; font-size: 1.1rem;">Chi tiết ảnh bằng chứng</h3>
+          <button @click="evidenceModalItem = null" style="background: none; border: none; font-size: 1.3rem; cursor: pointer; color: var(--text-muted);">✕</button>
+        </div>
+        <div class="modal-body" style="padding: 16px; max-height: 70vh; overflow-y: auto;">
+          <img :src="getEvidenceUrl(evidenceModalItem.evidence_path)" alt="Evidence" style="width: 100%; border-radius: 8px; display: block;" />
+          <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px; font-size: 0.9rem; color: var(--text-secondary);">
+            <p v-if="evidenceModalItem.violation_label" style="margin: 0;"><strong>Lỗi vi phạm:</strong> <span class="badge badge--violation" :class="'viol--' + evidenceModalItem.violation_type">{{ evidenceModalItem.violation_label }}</span></p>
+            <p v-if="evidenceModalItem.vehicle_class" style="margin: 0;"><strong>Loại xe:</strong> {{ classLabel(evidenceModalItem.vehicle_class) }}</p>
+            <p v-if="evidenceModalItem.plate_text" style="margin: 0;"><strong>Biển số:</strong> <span class="plate-text-lg" style="font-size: 0.85rem; padding: 2px 6px;">{{ evidenceModalItem.plate_text }}</span></p>
+            <p style="margin: 0;"><strong>Thời gian chụp:</strong> {{ formatTime(evidenceModalItem.created_at || evidenceModalItem.timestamp) }}</p>
           </div>
-          <button class="btn btn--ghost" style="margin-top:16px" @click="resetAll">Upload video moi</button>
         </div>
       </div>
     </div>
@@ -232,7 +313,15 @@
 <script setup>
 import { ref, onUnmounted } from 'vue'
 import VideoUploader from '@/components/VideoUploader.vue'
-import { analyzeImage, startAnalysis, getAnalysisStatus, createWebSocket } from '@/api/index.js'
+import {
+  analyzeImage,
+  startAnalysis,
+  getAnalysisStatus,
+  createWebSocket,
+  getViolations,
+  getDetections,
+  getEvidenceUrl
+} from '@/api/index.js'
 
 // ── Labels ──────────────────────────────────────────────────────
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
@@ -262,6 +351,9 @@ const jobStatus  = ref(null)
 const latestFrame= ref(null)
 const isStarting = ref(false)
 const statusText = ref('Chờ xử lý')
+const videoViolations = ref([])
+const videoDetections = ref([])
+const evidenceModalItem = ref(null)
 
 let pollTimer = null
 let ws = null
@@ -327,6 +419,24 @@ function connectWS() {
   } catch {}
 }
 
+async function loadVideoResults() {
+  if (!currentJob.value) return
+  try {
+    const filename = currentJob.value.filename
+    const violRes = await getViolations({ source_file: filename, limit: 100 })
+    videoViolations.value = violRes.violations || []
+
+    const detRes = await getDetections({ source_file: filename, limit: 100 })
+    videoDetections.value = detRes.detections || []
+  } catch (e) {
+    console.error('Error loading video results:', e)
+  }
+}
+
+function showVideoEvidence(item) {
+  evidenceModalItem.value = item
+}
+
 async function pollStatus() {
   if (!currentJob.value) return
   try {
@@ -334,7 +444,12 @@ async function pollStatus() {
     jobStatus.value = s
     const map = { pending:'Cho xu ly', processing:'Dang phan tich...', completed:'Hoan tat', error:'Loi' }
     statusText.value = map[s.status] || s.status
-    if (s.status === 'completed' || s.status === 'error') stopPolling()
+    if (s.status === 'completed' || s.status === 'error') {
+      stopPolling()
+      if (s.status === 'completed') {
+        await loadVideoResults()
+      }
+    }
   } catch {}
 }
 function startPolling() { pollStatus(); pollTimer = setInterval(pollStatus, 2000) }
@@ -345,6 +460,9 @@ function resetAll() {
   imageFile.value = null; imagePreview.value = null; imageResult.value = null
   imageLoading.value = false; dragOver.value = false
   currentJob.value = null; jobStatus.value = null; latestFrame.value = null
+  videoViolations.value = []
+  videoDetections.value = []
+  evidenceModalItem.value = null
   statusText.value = 'Chờ xử lý'
   stopPolling()
   if (ws) { ws.close(); ws = null }
@@ -358,6 +476,11 @@ function formatSize(b) {
 function formatDuration(s) {
   if (!s) return ''
   return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}`
+}
+function formatTime(ts) {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  return d.toLocaleString('vi-VN', { hour12: false })
 }
 
 onUnmounted(() => { stopPolling(); if (ws) ws.close() })
@@ -529,5 +652,42 @@ onUnmounted(() => { stopPolling(); if (ws) ws.close() })
 .plate-thumb {
   height: 36px; border-radius: 4px; margin-left: auto;
   border: 1px solid var(--border-color);
+}
+
+/* Modal style */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+/* Split Layout for Results */
+.results-split-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px;
+  align-items: start;
+  margin-top: 16px;
+}
+.results-visuals-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.results-lists-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 992px) {
+  .results-split-layout {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

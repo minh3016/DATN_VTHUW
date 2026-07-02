@@ -14,42 +14,22 @@
 
     <!-- KPI Cards -->
     <div class="kpi-grid">
-      <div class="kpi-card kpi-card--blue animate-fade-in" style="animation-delay:0ms">
+      <router-link to="/history" class="kpi-card kpi-card--blue kpi-card--clickable animate-fade-in" style="animation-delay:0ms; text-decoration: none; color: inherit;">
         <div class="kpi-icon">🚗</div>
         <div class="kpi-body">
           <div class="kpi-value">{{ vehicleStats.total_detections || 0 }}</div>
           <div class="kpi-label">Tổng phương tiện</div>
         </div>
         <div class="kpi-trend">24h</div>
-      </div>
-      <div class="kpi-card kpi-card--red animate-fade-in" style="animation-delay:80ms">
+      </router-link>
+      <router-link to="/violations" class="kpi-card kpi-card--red kpi-card--clickable animate-fade-in" style="animation-delay:80ms; text-decoration: none; color: inherit;">
         <div class="kpi-icon">⚠️</div>
         <div class="kpi-body">
           <div class="kpi-value">{{ violStats.total_violations || 0 }}</div>
           <div class="kpi-label">Tổng vi phạm</div>
         </div>
         <div class="kpi-trend">24h</div>
-      </div>
-      <div class="kpi-card kpi-card--yellow animate-fade-in" style="animation-delay:160ms">
-        <div class="kpi-icon">🪖</div>
-        <div class="kpi-body">
-          <div class="kpi-value">{{ violStats.by_type?.no_helmet || 0 }}</div>
-          <div class="kpi-label">Không đội MBH</div>
-        </div>
-        <div class="kpi-trend kpi-trend--sub">
-          Dây: {{ violStats.by_type?.no_seatbelt || 0 }} · ĐT: {{ violStats.by_type?.using_phone || 0 }}
-        </div>
-      </div>
-      <div class="kpi-card kpi-card--green animate-fade-in" style="animation-delay:240ms">
-        <div class="kpi-icon">🔢</div>
-        <div class="kpi-body">
-          <div class="kpi-value">{{ vehicleStats.by_category?.oto || 0 }}</div>
-          <div class="kpi-label">Xe ô tô</div>
-        </div>
-        <div class="kpi-trend kpi-trend--sub">
-          Xe máy: {{ vehicleStats.by_category?.xe_may || 0 }}
-        </div>
-      </div>
+      </router-link>
     </div>
 
     <!-- Charts row -->
@@ -222,6 +202,12 @@ onUnmounted(() => clearInterval(timer))
   transition: transform 0.2s, box-shadow 0.2s;
 }
 .kpi-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.kpi-card--clickable {
+  cursor: pointer;
+}
+.kpi-card--clickable:active {
+  transform: scale(0.98);
+}
 .kpi-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
 .kpi-card--blue   { background: linear-gradient(135deg, rgba(59,130,246,0.1), var(--bg-card)); }
 .kpi-card--blue::before   { background: var(--gradient-primary); }

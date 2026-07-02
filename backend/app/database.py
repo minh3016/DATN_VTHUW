@@ -87,6 +87,8 @@ async def get_detections(
     camera_id: Optional[str] = None,
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
 ) -> List[dict]:
     if _db is None:
         return []
@@ -97,6 +99,10 @@ async def get_detections(
         query["category"] = category
     if camera_id:
         query["camera_id"] = camera_id
+    if source_file:
+        query["source_file"] = source_file
+    if source_type:
+        query["source_type"] = source_type
     if start_time or end_time:
         query["created_at"] = {}
         if start_time:
@@ -121,6 +127,8 @@ async def count_detections(
     vehicle_class: Optional[str] = None,
     category: Optional[str] = None,
     camera_id: Optional[str] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
 ) -> int:
     if _db is None:
         return 0
@@ -131,6 +139,10 @@ async def count_detections(
         query["category"] = category
     if camera_id:
         query["camera_id"] = camera_id
+    if source_file:
+        query["source_file"] = source_file
+    if source_type:
+        query["source_type"] = source_type
     return await _db["detections"].count_documents(query)
 
 
@@ -197,6 +209,8 @@ async def get_violations(
     plate_text: Optional[str] = None,
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
 ) -> List[dict]:
     if _db is None:
         return []
@@ -205,6 +219,10 @@ async def get_violations(
         query["violation_type"] = violation_type
     if camera_id:
         query["camera_id"] = camera_id
+    if source_file:
+        query["source_file"] = source_file
+    if source_type:
+        query["source_type"] = source_type
     if plate_text:
         # Tìm kiếm biển số chứa chuỗi con (case-insensitive)
         query["plate_text"] = {"$regex": plate_text, "$options": "i"}
@@ -231,6 +249,8 @@ async def get_violations(
 async def count_violations(
     violation_type: Optional[str] = None,
     camera_id: Optional[str] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
 ) -> int:
     if _db is None:
         return 0
@@ -239,6 +259,10 @@ async def count_violations(
         query["violation_type"] = violation_type
     if camera_id:
         query["camera_id"] = camera_id
+    if source_file:
+        query["source_file"] = source_file
+    if source_type:
+        query["source_type"] = source_type
     return await _db["violations"].count_documents(query)
 
 
@@ -279,7 +303,8 @@ async def get_violation_stats(hours: int = 24) -> dict:
 
 async def create_analysis_job(filename: str, file_size: int,
                               duration_sec: float = 0,
-                              total_frames: int = 0) -> Optional[str]:
+                              total_frames: int = 0,
+                              filepath: Optional[str] = None) -> Optional[str]:
     if _db is None:
         return None
     doc = {
@@ -287,6 +312,7 @@ async def create_analysis_job(filename: str, file_size: int,
         "file_size": file_size,
         "duration_sec": duration_sec,
         "total_frames": total_frames,
+        "filepath": filepath,
         "status": "pending",
         "progress": 0.0,
         "processed_frames": 0,
