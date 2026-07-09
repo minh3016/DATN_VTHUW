@@ -78,12 +78,13 @@ class PlateRecognizer:
 
         return self._loaded
 
-    def detect_plates(self, frame: np.ndarray) -> List[PlateDetection]:
+    def detect_plates(self, frame: np.ndarray, imgsz: int = None) -> List[PlateDetection]:
         """
         Pipeline đầy đủ: detect biển số → OCR ký tự → ghép biển số.
 
         Args:
             frame: BGR numpy array
+            imgsz: Override YOLO inference size cho plate detection (None = use default)
 
         Returns:
             List[PlateDetection] với plate_text là biển số đã nhận diện
@@ -92,7 +93,7 @@ class PlateRecognizer:
             return []
 
         # Step 1: Detect vùng biển số
-        raw_plates = self._detector.detect(frame)
+        raw_plates = self._detector.detect(frame, imgsz=imgsz)
         detections: List[PlateDetection] = []
 
         for x1, y1, x2, y2, det_conf, cls_id in raw_plates:

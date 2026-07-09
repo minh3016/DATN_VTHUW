@@ -1,79 +1,216 @@
 <template>
-  <div class="dashboard">
-    <!-- Page header -->
-    <div class="page-header">
+  <div class="page-container">
+    <!-- Page Title -->
+    <div class="page-title-section">
       <div>
-        <h1><span class="text-gradient">Phat hien Vi pham Giao thong</span></h1>
-        <p class="page-sub">Traffic Violation Detection · YOLOv8n AI · 4 Models</p>
+        <h1>Tổng quan hệ thống</h1>
+        <p class="page-title-sub">Thống kê phát hiện vi phạm giao thông · 24 giờ qua</p>
       </div>
-      <div class="header-badges">
-        <span class="badge badge--success" v-if="backendOk">AI Online</span>
-        <span class="badge badge--danger" v-else>AI Offline</span>
+      <div class="header-actions">
+        <span class="badge" :class="backendOk ? 'badge--success' : 'badge--danger'">
+          <span class="status-dot" :class="backendOk ? 'status-dot--online' : 'status-dot--offline'"></span>
+          {{ backendOk ? 'AI Online' : 'AI Offline' }}
+        </span>
       </div>
     </div>
 
     <!-- KPI Cards -->
     <div class="kpi-grid">
-      <router-link to="/history" class="kpi-card kpi-card--blue kpi-card--clickable animate-fade-in" style="animation-delay:0ms; text-decoration: none; color: inherit;">
-        <div class="kpi-icon">🚗</div>
+      <router-link to="/history" class="kpi-card kpi-card--blue animate-fade-in" style="text-decoration:none;color:inherit">
+        <div class="kpi-icon-wrap kpi-icon-wrap--blue">
+          <LucideIcon name="car" :size="22" />
+        </div>
         <div class="kpi-body">
           <div class="kpi-value">{{ vehicleStats.total_detections || 0 }}</div>
           <div class="kpi-label">Tổng phương tiện</div>
         </div>
-        <div class="kpi-trend">24h</div>
       </router-link>
-      <router-link to="/violations" class="kpi-card kpi-card--red kpi-card--clickable animate-fade-in" style="animation-delay:80ms; text-decoration: none; color: inherit;">
-        <div class="kpi-icon">⚠️</div>
+
+      <div class="kpi-card kpi-card--green animate-fade-in" style="animation-delay:60ms">
+        <div class="kpi-icon-wrap kpi-icon-wrap--green">
+          <LucideIcon name="truck" :size="22" />
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value">{{ vehicleStats.by_category?.oto || 0 }}</div>
+          <div class="kpi-label">Xe ô tô</div>
+        </div>
+      </div>
+
+      <div class="kpi-card kpi-card--red animate-fade-in" style="animation-delay:120ms">
+        <div class="kpi-icon-wrap kpi-icon-wrap--red">
+          <LucideIcon name="bike" :size="22" />
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value">{{ vehicleStats.by_category?.xe_may || 0 }}</div>
+          <div class="kpi-label">Xe máy</div>
+        </div>
+      </div>
+
+      <router-link to="/violations" class="kpi-card kpi-card--yellow animate-fade-in" style="animation-delay:180ms;text-decoration:none;color:inherit">
+        <div class="kpi-icon-wrap kpi-icon-wrap--yellow">
+          <LucideIcon name="alert-triangle" :size="22" />
+        </div>
         <div class="kpi-body">
           <div class="kpi-value">{{ violStats.total_violations || 0 }}</div>
           <div class="kpi-label">Tổng vi phạm</div>
         </div>
-        <div class="kpi-trend">24h</div>
       </router-link>
+
+      <div class="kpi-card kpi-card--purple animate-fade-in" style="animation-delay:240ms">
+        <div class="kpi-icon-wrap kpi-icon-wrap--purple">
+          <LucideIcon name="credit-card" :size="22" />
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value">{{ plateCount }}</div>
+          <div class="kpi-label">Biển số nhận diện</div>
+        </div>
+      </div>
     </div>
 
-    <!-- Charts row -->
-    <div class="charts-row">
-      <!-- Vehicle Doughnut -->
-      <div class="card chart-card">
-        <h3>Phan bo loai xe (24h)</h3>
-        <div class="chart-wrap">
-          <Doughnut v-if="vehicleChartData" :data="vehicleChartData" :options="chartOptions" />
-          <div v-else class="no-data">Chưa có dữ liệu</div>
+    <!-- Charts Grid -->
+    <div class="charts-grid">
+      <!-- Vehicle distribution Doughnut -->
+      <div class="chart-card">
+        <div class="chart-card__title">
+          <LucideIcon name="pie-chart" :size="16" />
+          Phân bố loại xe (24h)
+        </div>
+        <div class="chart-card__body">
+          <Doughnut v-if="vehicleChartData" :data="vehicleChartData" :options="doughnutOptions" />
+          <div v-else class="empty-state">
+            <LucideIcon name="bar-chart-3" :size="36" />
+            <p>Chưa có dữ liệu</p>
+          </div>
         </div>
       </div>
 
-      <!-- Violations Bar -->
-      <div class="card chart-card">
-        <h3>Vi pham giao thong (24h)</h3>
-        <div class="chart-wrap">
+      <!-- Violation Bar chart -->
+      <div class="chart-card">
+        <div class="chart-card__title">
+          <LucideIcon name="alert-circle" :size="16" />
+          Vi phạm theo loại (24h)
+        </div>
+        <div class="chart-card__body">
           <Bar v-if="violationChartData" :data="violationChartData" :options="barOptions" />
-          <div v-else class="no-data">Chưa có vi phạm</div>
+          <div v-else class="empty-state">
+            <LucideIcon name="shield-check" :size="36" />
+            <p>Chưa phát hiện vi phạm</p>
+          </div>
         </div>
       </div>
 
-      <!-- Quick action card -->
-      <div class="card quick-card">
-        <h3>He thong AI</h3>
-        <p class="quick-desc">Hệ thống phát hiện vi phạm giao thông tích hợp 4 model AI</p>
-        <router-link to="/upload" class="btn btn--primary quick-btn">
-          Upload & Phan tich
-        </router-link>
-        <div class="quick-stats">
-          <div class="qs-item">
-            <span class="qs-val">4</span>
-            <span class="qs-label">AI Models</span>
+      <!-- Violation by class breakdown -->
+      <div class="chart-card">
+        <div class="chart-card__title">
+          <LucideIcon name="bar-chart-2" :size="16" />
+          Phương tiện theo lớp (24h)
+        </div>
+        <div class="chart-card__body">
+          <Bar v-if="classChartData" :data="classChartData" :options="classBarOptions" />
+          <div v-else class="empty-state">
+            <LucideIcon name="bar-chart-3" :size="36" />
+            <p>Chưa có dữ liệu</p>
           </div>
-          <div class="qs-item">
-            <span class="qs-val">YOLOv8n</span>
-            <span class="qs-label">Engine</span>
+        </div>
+      </div>
+
+      <!-- System Info Card -->
+      <div class="chart-card system-card">
+        <div class="chart-card__title">
+          <LucideIcon name="cpu" :size="16" />
+          Hệ thống AI
+        </div>
+        <div class="system-info">
+          <div class="sys-row">
+            <span class="sys-label">Engine</span>
+            <span class="sys-value">YOLOv8n</span>
           </div>
+          <div class="sys-row">
+            <span class="sys-label">AI Models</span>
+            <span class="sys-value">4 models</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Phát hiện xe</span>
+            <span class="sys-value badge--mini" :class="backendOk ? 'badge--mini--ok' : 'badge--mini--off'">{{ backendOk ? 'Active' : 'Off' }}</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Vi phạm GT</span>
+            <span class="sys-value badge--mini" :class="backendOk ? 'badge--mini--ok' : 'badge--mini--off'">{{ backendOk ? 'Active' : 'Off' }}</span>
+          </div>
+          <div class="sys-row">
+            <span class="sys-label">Nhận diện biển số</span>
+            <span class="sys-value badge--mini" :class="backendOk ? 'badge--mini--ok' : 'badge--mini--off'">{{ backendOk ? 'Active' : 'Off' }}</span>
+          </div>
+          <router-link to="/upload" class="btn btn--primary btn--lg" style="width:100%;margin-top:12px;text-decoration:none">
+            <LucideIcon name="upload-cloud" :size="18" />
+            Upload & Phân tích
+          </router-link>
         </div>
       </div>
     </div>
 
-    <!-- Recent detections table -->
-    <DetectionTable />
+    <!-- Recent Violations -->
+    <div class="recent-section animate-fade-in" style="animation-delay:300ms">
+      <div class="section-header">
+        <h3>
+          <LucideIcon name="alert-triangle" :size="18" />
+          Vi phạm gần đây
+        </h3>
+        <router-link to="/violations" class="btn btn--ghost btn--sm">
+          Xem tất cả
+          <LucideIcon name="arrow-right" :size="14" />
+        </router-link>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Thời gian</th>
+              <th>Loại vi phạm</th>
+              <th>Biển số</th>
+              <th>Confidence</th>
+              <th>Nguồn</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!recentViolations.length">
+              <td colspan="6" class="table-empty">Chưa có vi phạm nào</td>
+            </tr>
+            <tr v-for="(v, i) in recentViolations" :key="v._id">
+              <td class="mono">{{ i + 1 }}</td>
+              <td class="mono">{{ formatTime(v.created_at) }}</td>
+              <td>
+                <span class="badge badge--violation" :class="'viol--' + v.violation_type">
+                  {{ v.violation_label || violLabel(v.violation_type) }}
+                </span>
+              </td>
+              <td>
+                <span v-if="v.plate_text" class="plate-text">{{ v.plate_text }}</span>
+                <span v-else class="text-muted">—</span>
+              </td>
+              <td>
+                <div class="conf-bar">
+                  <div class="conf-bar__track">
+                    <div
+                      class="conf-bar__fill"
+                      :class="confClass(v.confidence)"
+                      :style="{ width: (v.confidence * 100) + '%' }"
+                    ></div>
+                  </div>
+                  <span class="conf-bar__label">{{ (v.confidence * 100).toFixed(0) }}%</span>
+                </div>
+              </td>
+              <td>
+                <span class="source-badge" :class="'source-badge--' + v.source_type">
+                  {{ v.source_type }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -84,23 +221,30 @@ import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
   BarElement, CategoryScale, LinearScale,
 } from 'chart.js'
-import DetectionTable from '@/components/DetectionTable.vue'
-import { getStats, getViolationStats, getHealth } from '@/api/index.js'
+import LucideIcon from '@/components/LucideIcon.vue'
+import { getStats, getViolationStats, getHealth, getViolations } from '@/api/index.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale)
 
 const vehicleStats = ref({ total_detections: 0, by_class: {}, by_category: {} })
 const violStats = ref({ total_violations: 0, by_type: {} })
 const backendOk = ref(false)
+const recentViolations = ref([])
+const plateCount = ref(0)
 
-// ── Labels ──────────────────────────────────────────────────────
-const CLASS_LABELS = {
-  car: 'Xe con', truck: 'Xe tai', bus: 'Xe bus', motorcycle: 'Xe may',
+const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
+const VIOL_LABELS = { no_helmet: 'Không đội MBH', no_seatbelt: 'Không thắt dây', using_phone: 'Dùng điện thoại' }
+function violLabel(v) { return VIOL_LABELS[v] || v }
+
+function confClass(c) {
+  if (c >= 0.8) return 'conf-bar__fill--high'
+  if (c >= 0.5) return 'conf-bar__fill--medium'
+  return 'conf-bar__fill--low'
 }
-const VIOL_LABELS = {
-  no_helmet: 'Khong doi MBH',
-  no_seatbelt: 'Khong that day',
-  using_phone: 'Dung dien thoai',
+
+function formatTime(ts) {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleString('vi-VN', { hour12: false, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' })
 }
 
 // ── Vehicle Doughnut ────────────────────────────────────────────
@@ -113,16 +257,17 @@ const vehicleChartData = computed(() => {
     datasets: [{
       data: keys.map(k => byClass[k]),
       backgroundColor: ['#22c55e', '#f59e0b', '#06b6d4', '#ef4444'],
-      borderWidth: 0, hoverOffset: 8,
+      borderWidth: 0, hoverOffset: 6,
     }],
   }
 })
 
-const chartOptions = {
+const doughnutOptions = {
   responsive: true, maintainAspectRatio: false,
+  cutout: '65%',
   plugins: {
-    legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 }, padding: 12 } },
-    tooltip: { backgroundColor: '#1a2235', borderColor: 'rgba(99,102,241,0.3)', borderWidth: 1 },
+    legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11, family: 'Inter' }, padding: 12, usePointStyle: true, pointStyleWidth: 8 } },
+    tooltip: { backgroundColor: '#1e293b', borderColor: 'rgba(148,163,184,0.2)', borderWidth: 1, titleFont: { family: 'Inter' }, bodyFont: { family: 'Inter' } },
   },
 }
 
@@ -134,10 +279,11 @@ const violationChartData = computed(() => {
   return {
     labels: keys.map(k => VIOL_LABELS[k] || k),
     datasets: [{
-      label: 'Vi pham',
+      label: 'Vi phạm',
       data: keys.map(k => byType[k]),
-      backgroundColor: ['#ef4444', '#f59e0b', '#a855f7'],
-      borderRadius: 8, borderSkipped: false,
+      backgroundColor: ['#f59e0b', '#ef4444', '#a855f7'],
+      borderRadius: 6, borderSkipped: false,
+      barThickness: 24,
     }],
   }
 })
@@ -147,26 +293,55 @@ const barOptions = {
   indexAxis: 'y',
   plugins: {
     legend: { display: false },
-    tooltip: { backgroundColor: '#1a2235' },
+    tooltip: { backgroundColor: '#1e293b', borderColor: 'rgba(148,163,184,0.2)', borderWidth: 1 },
   },
   scales: {
-    x: { grid: { color: 'rgba(99,102,241,0.08)' }, ticks: { color: '#64748b' } },
+    x: { grid: { color: 'rgba(148,163,184,0.06)' }, ticks: { color: '#64748b', font: { size: 11 } } },
     y: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 12 } } },
+  },
+}
+
+// ── Class breakdown bar ─────────────────────────────────────────
+const classChartData = computed(() => {
+  const byClass = vehicleStats.value.by_class || {}
+  const keys = Object.keys(byClass)
+  if (!keys.length) return null
+  const colors = { car: '#22c55e', truck: '#f59e0b', bus: '#06b6d4', motorcycle: '#ef4444' }
+  return {
+    labels: keys.map(k => CLASS_LABELS[k] || k),
+    datasets: [{
+      label: 'Số lượng',
+      data: keys.map(k => byClass[k]),
+      backgroundColor: keys.map(k => colors[k] || '#64748b'),
+      borderRadius: 6, borderSkipped: false,
+      barThickness: 28,
+    }],
+  }
+})
+const classBarOptions = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: { backgroundColor: '#1e293b' },
+  },
+  scales: {
+    x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 11 } } },
+    y: { grid: { color: 'rgba(148,163,184,0.06)' }, ticks: { color: '#64748b', font: { size: 11 } }, beginAtZero: true },
   },
 }
 
 // ── Load ────────────────────────────────────────────────────────
 async function loadStats() {
-  try {
-    vehicleStats.value = await getStats(24)
-  } catch {}
-  try {
-    violStats.value = await getViolationStats(24)
-  } catch {}
+  try { vehicleStats.value = await getStats(24) } catch {}
+  try { violStats.value = await getViolationStats(24) } catch {}
   try {
     const h = await getHealth()
     backendOk.value = h.status === 'ok'
   } catch { backendOk.value = false }
+  try {
+    const data = await getViolations({ limit: 5 })
+    recentViolations.value = data.violations || []
+  } catch {}
 }
 
 let timer = null
@@ -175,90 +350,60 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <style scoped>
-.dashboard {
-  padding: var(--sp-xl);
-  display: flex; flex-direction: column; gap: var(--sp-xl);
-  animation: fadeIn 0.4s ease;
+/* Charts Grid */
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-lg);
+  margin-top: var(--sp-xl);
+}
+@media (max-width: 1100px) { .charts-grid { grid-template-columns: 1fr; } }
+
+/* System info card */
+.system-card .chart-card__body { height: auto; }
+.system-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sys-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.sys-row:last-of-type { border-bottom: none; }
+.sys-label { color: var(--text-muted); }
+.sys-value { color: var(--text-primary); font-weight: 600; font-size: 0.85rem; }
+.badge--mini {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.badge--mini--ok  { background: rgba(16,185,129,0.12); color: #34d399; }
+.badge--mini--off { background: rgba(239,68,68,0.12);  color: #f87171; }
+
+/* Section header */
+.recent-section {
+  margin-top: var(--sp-xl);
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-md);
+}
+.section-header h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-sm);
+  font-size: 1rem;
+  margin: 0;
 }
 
-/* Header */
-.page-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  flex-wrap: wrap; gap: var(--sp-md);
-}
-.page-header h1 { margin: 0; }
-.page-sub { margin: 4px 0 0; color: var(--text-muted); font-size: 0.875rem; }
-.header-badges { display: flex; gap: var(--sp-sm); }
-
-/* KPI */
-.kpi-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-md);
-}
-.kpi-card {
-  display: flex; align-items: center; gap: var(--sp-md);
-  padding: var(--sp-lg); border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
-  position: relative; overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.kpi-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-.kpi-card--clickable {
-  cursor: pointer;
-}
-.kpi-card--clickable:active {
-  transform: scale(0.98);
-}
-.kpi-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
-.kpi-card--blue   { background: linear-gradient(135deg, rgba(59,130,246,0.1), var(--bg-card)); }
-.kpi-card--blue::before   { background: var(--gradient-primary); }
-.kpi-card--green  { background: linear-gradient(135deg, rgba(34,197,94,0.1), var(--bg-card)); }
-.kpi-card--green::before  { background: var(--gradient-success); }
-.kpi-card--red    { background: linear-gradient(135deg, rgba(239,68,68,0.1), var(--bg-card)); }
-.kpi-card--red::before    { background: var(--gradient-danger); }
-.kpi-card--yellow { background: linear-gradient(135deg, rgba(245,158,11,0.1), var(--bg-card)); }
-.kpi-card--yellow::before { background: linear-gradient(135deg, #f59e0b, #d97706); }
-.kpi-card--purple { background: linear-gradient(135deg, rgba(139,92,246,0.1), var(--bg-card)); }
-.kpi-card--purple::before { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
-.kpi-icon  { font-size: 1.8rem; }
-.kpi-body  { flex: 1; }
-.kpi-value { font-size: 2rem; font-weight: 800; line-height: 1; }
-.kpi-label { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
-.kpi-trend {
-  font-size: 0.68rem; color: var(--text-muted);
-  background: rgba(255,255,255,0.05); border-radius: var(--radius-full);
-  padding: 2px 8px; border: 1px solid var(--border-color);
-}
-.kpi-trend--sub { font-size: 0.65rem; max-width: 110px; text-align: center; line-height: 1.3; }
-
-/* Charts row */
-.charts-row {
-  display: grid; grid-template-columns: 1fr 1fr 280px; gap: var(--sp-lg); align-items: start;
-}
-@media (max-width: 1100px) { .charts-row { grid-template-columns: 1fr 1fr; } .quick-card { display: none; } }
-@media (max-width: 700px)  { .charts-row { grid-template-columns: 1fr; } }
-
-.chart-card { padding: var(--sp-lg); }
-.chart-card h3 { font-size: 0.9rem; margin: 0 0 var(--sp-md); color: var(--text-secondary); }
-.chart-wrap { height: 200px; position: relative; }
-
-/* Quick card */
-.quick-card { padding: var(--sp-lg); display: flex; flex-direction: column; gap: var(--sp-md); }
-.quick-card h3 { font-size: 0.9rem; margin: 0; color: var(--text-secondary); }
-.quick-desc { font-size: 0.82rem; color: var(--text-muted); margin: 0; line-height: 1.4; }
-.quick-btn {
-  display: block; text-align: center; text-decoration: none;
-  padding: 12px; font-size: 0.9rem; font-weight: 600;
-  border-radius: var(--radius-md);
-}
-.quick-stats {
-  display: flex; gap: var(--sp-md); border-top: 1px solid var(--border-color); padding-top: var(--sp-md);
-}
-.qs-item { flex: 1; text-align: center; }
-.qs-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
-.qs-label { display: block; font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
-
-.no-data {
-  display: flex; align-items: center; justify-content: center;
-  height: 100%; color: var(--text-muted); font-size: 0.82rem;
-}
+/* Header actions */
+.header-actions { display: flex; gap: var(--sp-sm); align-items: center; }
 </style>

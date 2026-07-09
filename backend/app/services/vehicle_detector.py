@@ -76,9 +76,13 @@ class VehicleDetector:
             )
         return success
 
-    def detect(self, frame: np.ndarray) -> List[VehicleDetection]:
+    def detect(self, frame: np.ndarray, imgsz: int = None) -> List[VehicleDetection]:
         """
         Phát hiện và phân loại phương tiện trong frame.
+
+        Args:
+            frame: BGR numpy array
+            imgsz: Override YOLO inference size (None = use model default)
 
         Returns:
             List[VehicleDetection] với class_name và category
@@ -86,7 +90,7 @@ class VehicleDetector:
         if not self._loaded:
             return []
 
-        raw_dets = self._wrapper.detect(frame)
+        raw_dets = self._wrapper.detect(frame, imgsz=imgsz)
         detections: List[VehicleDetection] = []
         class_names = self._wrapper.class_names
 

@@ -89,6 +89,7 @@ class ViolationDetector:
         self,
         frame: np.ndarray,
         violations_only: bool = True,
+        imgsz: int = None,
     ) -> List[ViolationDetection]:
         """
         Phát hiện vi phạm giao thông trong frame.
@@ -97,6 +98,7 @@ class ViolationDetector:
             frame: BGR numpy array
             violations_only: Nếu True, chỉ trả về các detection là vi phạm
                             Nếu False, trả về tất cả (cả hợp lệ)
+            imgsz: Override YOLO inference size (None = use model default)
 
         Returns:
             List[ViolationDetection]
@@ -104,7 +106,7 @@ class ViolationDetector:
         if not self._loaded:
             return []
 
-        raw_dets = self._wrapper.detect(frame)
+        raw_dets = self._wrapper.detect(frame, imgsz=imgsz)
         detections: List[ViolationDetection] = []
 
         for x1, y1, x2, y2, conf, cls_id in raw_dets:

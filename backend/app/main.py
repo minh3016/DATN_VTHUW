@@ -61,6 +61,8 @@ from .config import (
     EVIDENCE_DIR, UPLOAD_DIR, MAX_UPLOAD_DURATION_SEC, MAX_UPLOAD_SIZE_MB,
     ENABLE_VEHICLE_DETECTION, ENABLE_VIOLATION_DETECTION, ENABLE_PLATE_RECOGNITION,
     ENABLE_ROI, ROI_X1, ROI_Y1, ROI_X2, ROI_Y2,
+    ENABLE_FRAME_UPSCALE, UPSCALE_MIN_WIDTH, UPSCALE_TARGET_WIDTH,
+    ENABLE_FRAME_ENHANCE, YOLO_INFER_SIZE, SAVE_ANNOTATED_EVIDENCE,
 )
 from .database import (
     connect_to_mongo,
@@ -102,6 +104,8 @@ from .utils.image_utils import (
     resize_keep_aspect,
     draw_bounding_box,
     add_overlay_info,
+    upscale_frame,
+    enhance_frame,
 )
 from .utils.evidence_storage import save_evidence, get_evidence_path
 
@@ -182,18 +186,39 @@ def _process_frame(
     camera_id: str = "CAM_01",
 ) -> dict:
     """
-    Xử lý 1 frame qua 3 module AI:
-    ① Vehicle Detection → phân loại phương tiện
-    ② Violation Detection → phát hiện vi phạm
-    ③ Plate Recognition → nhận diện biển số
-    ④ Draw bounding boxes
-    ⑤ Overlay info
-    ⑥ Encode base64
+    Xử lý 1 frame qua pipeline AI:
+    ① Upscale + Enhance frame (tăng độ phân giải + cải thiện chất lượng)
+    ② Vehicle Detection → phân loại phương tiện
+    ③ Violation Detection → phát hiện vi phạm
+    ④ Plate Recognition → nhận diện biển số
+    ⑤ Draw bounding boxes
+    ⑥ Overlay info
+    ⑦ Encode base64
 
-    Returns: dict kết quả + annotated frame base64.
+    Returns: dict kết quả + annotated frame (base64 và numpy).
     """
     t0 = time.time()
-    annotated = frame.copy()
+
+    # ⓪ UPSCALE + ENHANCE frame trước detect để tăng chất lượng nhận diện
+    detect_frame = frame.copy()
+    if ENABLE_FRAME_UPSCALE:
+        detect_frame = upscale_frame(detect_frame, UPSCALE_MIN_WIDTH, UPSCALE_TARGET_WIDTH)
+    if ENABLE_FRAME_ENHANCE:
+        detect_frame = enhance_frame(detect_frame)
+
+    annotated = detect_frame.copy()
+
+    # Tính tỉ lệ scale ROI theo kích thước frame đã upscale
+    h_orig, w_orig = frame.shape[:2]
+    h_up, w_up = detect_frame.shape[:2]
+    scale_x = w_up / w_orig if w_orig > 0 else 1.0
+    scale_y = h_up / h_orig if h_orig > 0 else 1.0
+
+    # ROI coordinates được scale theo tỉ lệ upscale
+    roi_x1 = int(ROI_X1 * scale_x)
+    roi_y1 = int(ROI_Y1 * scale_y)
+    roi_x2 = int(ROI_X2 * scale_x)
+    roi_y2 = int(ROI_Y2 * scale_y)
 
     # Định nghĩa kiểm tra xem hộp bao có nằm trong vùng ROI hay không
     def is_box_inside_roi(box) -> bool:
@@ -203,21 +228,21 @@ def _process_frame(
         # Điểm tiếp xúc chân đế phương tiện với mặt đường (Bottom center)
         xc = (x1_v + x2_v) / 2.0
         yc = y2_v
-        if (ROI_X1 <= xc <= ROI_X2) and (ROI_Y1 <= yc <= ROI_Y2):
+        if (roi_x1 <= xc <= roi_x2) and (roi_y1 <= yc <= roi_y2):
             return True
         # Điểm trung tâm hình học (Centroid fallback)
         yc_center = (y1_v + y2_v) / 2.0
-        if (ROI_X1 <= xc <= ROI_X2) and (ROI_Y1 <= yc_center <= ROI_Y2):
+        if (roi_x1 <= xc <= roi_x2) and (roi_y1 <= yc_center <= roi_y2):
             return True
         return False
 
-    # Vẽ khung giới hạn vùng phát hiện (ROI Box) lên màn hình
+    # Vẽ khung ROI nếu bật
     if ENABLE_ROI:
-        cv2.rectangle(annotated, (ROI_X1, ROI_Y1), (ROI_X2, ROI_Y2), (0, 180, 255), 2)
+        cv2.rectangle(annotated, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 180, 255), 2)
         cv2.putText(
             annotated,
             "KHU VUC PHAT HIEN (DETECTION ZONE)",
-            (ROI_X1 + 5, ROI_Y1 - 6),
+            (roi_x1 + 5, roi_y1 - 6),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (0, 180, 255),
@@ -225,59 +250,68 @@ def _process_frame(
             cv2.LINE_AA,
         )
 
-    # ① Vehicle Detection
+    # Xác định YOLO inference size
+    infer_size = YOLO_INFER_SIZE if YOLO_INFER_SIZE > 0 else None
+
+    # ① Vehicle Detection (dùng detect_frame đã upscale + YOLO_INFER_SIZE)
     vehicles = []
     if ENABLE_VEHICLE_DETECTION and vehicle_detector.is_loaded:
-        vehicles = vehicle_detector.detect(frame)
+        vehicles = vehicle_detector.detect(detect_frame, imgsz=infer_size)
 
     violations = []
     if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
-        violations = violation_detector.detect(frame, violations_only=True)
+        violations = violation_detector.detect(detect_frame, violations_only=True, imgsz=infer_size)
 
     plates = []
     if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
-        plates = plate_recognizer.detect_plates(frame)
+        plates = plate_recognizer.detect_plates(detect_frame, imgsz=infer_size)
 
-    # Phân loại đối tượng ở trong hay ngoài ROI
-    active_vehicles = []
-    for v in vehicles:
-        box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
-        if is_box_inside_roi(box):
-            active_vehicles.append(v)
-        else:
-            # Các xe ngoài khu vực được vẽ bằng nét xám nhạt và không được tính
-            draw_bounding_box(
-                annotated,
-                int(v.bbox.x1), int(v.bbox.y1), int(v.bbox.x2), int(v.bbox.y2),
-                f"{v.class_name} (ngoai vung)", (140, 140, 140),
-                thickness=1,
-            )
+    # Phân loại đối tượng: khi ROI tắt, tất cả đều active
+    if not ENABLE_ROI:
+        # Không filter – toàn bộ detections đều active
+        active_vehicles = vehicles
+        active_plates = plates
+        active_violations = violations
+    else:
+        # Filter theo ROI
+        active_vehicles = []
+        for v in vehicles:
+            box = (v.bbox.x1, v.bbox.y1, v.bbox.x2, v.bbox.y2)
+            if is_box_inside_roi(box):
+                active_vehicles.append(v)
+            else:
+                draw_bounding_box(
+                    annotated,
+                    int(v.bbox.x1), int(v.bbox.y1), int(v.bbox.x2), int(v.bbox.y2),
+                    f"{v.class_name} (ngoai vung)", (140, 140, 140),
+                    thickness=1,
+                )
 
-    active_plates = []
-    for plate in plates:
-        box = (plate.bbox.x1, plate.bbox.y1, plate.bbox.x2, plate.bbox.y2)
-        if is_box_inside_roi(box):
-            active_plates.append(plate)
-        else:
-            draw_bounding_box(
-                annotated,
-                int(plate.bbox.x1), int(plate.bbox.y1), int(plate.bbox.x2), int(plate.bbox.y2),
-                "BS (ngoai vung)", (180, 180, 180),
-                thickness=1,
-            )
+        active_plates = []
+        for plate in plates:
+            box = (plate.bbox.x1, plate.bbox.y1, plate.bbox.x2, plate.bbox.y2)
+            if is_box_inside_roi(box):
+                active_plates.append(plate)
+            else:
+                draw_bounding_box(
+                    annotated,
+                    int(plate.bbox.x1), int(plate.bbox.y1), int(plate.bbox.x2), int(plate.bbox.y2),
+                    "BS (ngoai vung)", (180, 180, 180),
+                    thickness=1,
+                )
 
-    active_violations = []
-    for viol in violations:
-        box = (viol.bbox.x1, viol.bbox.y1, viol.bbox.x2, viol.bbox.y2)
-        if is_box_inside_roi(box):
-            active_violations.append(viol)
-        else:
-            draw_bounding_box(
-                annotated,
-                int(viol.bbox.x1), int(viol.bbox.y1), int(viol.bbox.x2), int(viol.bbox.y2),
-                f"VP: {viol.violation_label} (ngoai vung)", (140, 140, 140),
-                thickness=1,
-            )
+        active_violations = []
+        for viol in violations:
+            box = (viol.bbox.x1, viol.bbox.y1, viol.bbox.x2, viol.bbox.y2)
+            if is_box_inside_roi(box):
+                active_violations.append(viol)
+            else:
+                draw_bounding_box(
+                    annotated,
+                    int(viol.bbox.x1), int(viol.bbox.y1), int(viol.bbox.x2), int(viol.bbox.y2),
+                    f"VP: {viol.violation_label} (ngoai vung)", (140, 140, 140),
+                    thickness=1,
+                )
 
     # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng (chỉ với đối tượng trong ROI)
     from .utils.image_utils import calculate_containment_ratio
@@ -379,7 +413,7 @@ def _process_frame(
     )
 
     # ⑦ Encode annotated frame
-    frame_b64 = numpy_to_base64(annotated, quality=70)
+    frame_b64 = numpy_to_base64(annotated, quality=85)
 
     return {
         "frame_id": frame_id,
@@ -399,6 +433,8 @@ def _process_frame(
         # Meta
         "fps": fps,
         "frame_base64": frame_b64,
+        # Annotated frame numpy (dùng để lưu evidence có bounding box)
+        "annotated_frame": annotated,
     }
 
 
@@ -583,6 +619,7 @@ async def analyze_frame(payload: dict):
     frame = base64_to_numpy(b64)
     frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
     result = _process_frame(frame, camera_id=payload.get("camera_id", "API"))
+    result.pop("annotated_frame", None)
     return result
 
 
@@ -608,12 +645,16 @@ async def analyze_image(file: UploadFile = File(...)):
 
     frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
 
-    # Process
+    # Process (upscale + enhance sẽ được thực hiện bên trong _process_frame)
     result = _process_frame(frame, camera_id="UPLOAD_IMG")
 
-    # Save evidence (annotated image)
+    # Save evidence (annotated image có bounding box)
     evidence_id = uuid.uuid4().hex[:12]
-    evidence_path = save_evidence(frame, f"img_{evidence_id}")
+    annotated_frame = result.get("annotated_frame")
+    if annotated_frame is not None and SAVE_ANNOTATED_EVIDENCE:
+        evidence_path = save_evidence(annotated_frame, f"img_{evidence_id}")
+    else:
+        evidence_path = save_evidence(frame, f"img_{evidence_id}")
 
     # Save detections to DB
     saved_detection_ids = []
@@ -646,6 +687,9 @@ async def analyze_image(file: UploadFile = File(...)):
         ))
         if viol_id:
             saved_violation_ids.append(viol_id)
+
+    # Xóa annotated_frame numpy khỏi response (không JSON serializable)
+    result.pop("annotated_frame", None)
 
     result["evidence_path"] = evidence_path
     result["source_file"] = file.filename
@@ -852,6 +896,9 @@ async def _analyze_video_task(job_id: str, video_path: str):
             frame_violations = result.get("violation_count", 0)
             frame_plates = result.get("plate_count", 0)
 
+            # Lấy annotated frame (có bounding box) để lưu evidence
+            evidence_source = result.get("annotated_frame") if SAVE_ANNOTATED_EVIDENCE else frame
+
             # Dọn dẹp dữ liệu theo dõi quá cũ (> 15 processed frames)
             recent_detections = [d for d in recent_detections if processed - d["frame_idx"] <= 15]
             recent_violations = [v for v in recent_violations if processed - v["frame_idx"] <= 15]
@@ -867,7 +914,7 @@ async def _analyze_video_task(job_id: str, video_path: str):
                             break
                 if not is_duplicate:
                     evidence_path = save_evidence(
-                        frame, f"{job_id}_{processed}_{v['class_name']}"
+                        evidence_source, f"{job_id}_{processed}_{v['class_name']}"
                     )
                     await create_detection(DetectionCreate(
                         vehicle_class=v["class_name"],
@@ -902,7 +949,7 @@ async def _analyze_video_task(job_id: str, video_path: str):
                             break
                 if not is_duplicate:
                     evidence_path = save_evidence(
-                        frame, f"{job_id}_{processed}_viol_{viol['violation_type']}"
+                        evidence_source, f"{job_id}_{processed}_viol_{viol['violation_type']}"
                     )
                     await create_violation(ViolationCreate(
                         violation_type=viol["violation_type"],
@@ -937,6 +984,9 @@ async def _analyze_video_task(job_id: str, video_path: str):
                              f"{frame_violations} violations, {frame_plates} plates. "
                              f"Total Unique: {vehicles_total} vehicles, {violations_total} violations, {plates_total} plates.")
 
+            # Xóa annotated_frame numpy trước khi broadcast qua WebSocket
+            ws_result = {k: v for k, v in result.items() if k != "annotated_frame"}
+
             # Broadcast via WebSocket
             await manager.broadcast({
                 "type": "upload_progress",
@@ -944,7 +994,7 @@ async def _analyze_video_task(job_id: str, video_path: str):
                     "job_id": job_id,
                     "frame_id": processed,
                     "progress": min(1.0, processed / max(total_process, 1)),
-                    "frame_result": result,
+                    "frame_result": ws_result,
                 },
             }, room="upload")
 
@@ -1120,6 +1170,11 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
             frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
             result = _process_frame(frame, frame_id=frame_idx, camera_id=camera_id)
 
+            # Lấy annotated frame để lưu evidence có bounding box
+            evidence_source = result.get("annotated_frame") if SAVE_ANNOTATED_EVIDENCE else frame
+            # Xóa numpy array trước khi broadcast qua WebSocket
+            result.pop("annotated_frame", None)
+
             # Update camera info
             _cameras[camera_id]["info"]["fps"] = result.get("fps", 0)
             _cameras[camera_id]["info"]["frame_count"] = frame_idx
@@ -1139,7 +1194,7 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                     for v in result["vehicles"]:
                         if v["class_name"] not in seen:
                             evidence_path = save_evidence(
-                                frame, f"stream_{camera_id}_{frame_idx}_{v['class_name']}"
+                                evidence_source, f"stream_{camera_id}_{frame_idx}_{v['class_name']}"
                             )
                             await create_detection(DetectionCreate(
                                 vehicle_class=v["class_name"],
@@ -1155,7 +1210,7 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                 if result.get("violations"):
                     for viol in result["violations"]:
                         evidence_path = save_evidence(
-                            frame, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
+                            evidence_source, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
                         )
                         await create_violation(ViolationCreate(
                             violation_type=viol["violation_type"],

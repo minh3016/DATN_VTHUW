@@ -52,9 +52,26 @@ ENABLE_VIOLATION_DETECTION: bool = os.getenv("ENABLE_VIOLATION_DETECTION", "true
 ENABLE_PLATE_RECOGNITION: bool = os.getenv("ENABLE_PLATE_RECOGNITION", "true").lower() == "true"
 
 # ── Frame processing ──────────────────────────────────────────
-FRAME_WIDTH: int = int(os.getenv("FRAME_WIDTH", "1280"))
-FRAME_HEIGHT: int = int(os.getenv("FRAME_HEIGHT", "720"))
+# Kích thước tối đa cho frame trước khi xử lý (giữ nguyên độ phân giải gốc nếu <= giới hạn)
+FRAME_WIDTH: int = int(os.getenv("FRAME_WIDTH", "1920"))
+FRAME_HEIGHT: int = int(os.getenv("FRAME_HEIGHT", "1080"))
 PROCESS_FPS: int = int(os.getenv("PROCESS_FPS", "3"))  # downsample rate
+
+# ── Frame Enhancement (tăng chất lượng trước detect) ─────────
+# Upscale frame nhỏ bằng Bicubic interpolation trước khi detect
+ENABLE_FRAME_UPSCALE: bool = os.getenv("ENABLE_FRAME_UPSCALE", "true").lower() == "true"
+UPSCALE_MIN_WIDTH: int = int(os.getenv("UPSCALE_MIN_WIDTH", "960"))    # Chỉ upscale nếu width < giá trị này
+UPSCALE_TARGET_WIDTH: int = int(os.getenv("UPSCALE_TARGET_WIDTH", "1920"))  # Upscale lên tối đa
+
+# Tiền xử lý ảnh (Bilateral denoise + nhẹ sharpen) trước detect
+# TẮT mặc định – chỉ bật khi video quá tối/mờ gốc
+ENABLE_FRAME_ENHANCE: bool = os.getenv("ENABLE_FRAME_ENHANCE", "false").lower() == "true"
+
+# YOLO inference resolution (mặc định ultralytics = 640, tăng lên 960 cho chất lượng cao hơn)
+YOLO_INFER_SIZE: int = int(os.getenv("YOLO_INFER_SIZE", "960"))
+
+# Lưu evidence có bounding box (annotated frame) thay vì frame gốc
+SAVE_ANNOTATED_EVIDENCE: bool = os.getenv("SAVE_ANNOTATED_EVIDENCE", "true").lower() == "true"
 
 # ── File storage ──────────────────────────────────────────────
 EVIDENCE_DIR: Path = Path(os.getenv("EVIDENCE_DIR", str(BASE_DIR / "backend" / "evidence")))
@@ -71,9 +88,9 @@ CORS_ORIGINS: list = os.getenv(
 WS_HEARTBEAT_INTERVAL: int = int(os.getenv("WS_HEARTBEAT_INTERVAL", "30"))
 
 # ── Region of Interest (ROI) ──
-# Khu vực phát hiện mặc định trên khung hình 1280x720
-ENABLE_ROI: bool = os.getenv("ENABLE_ROI", "true").lower() == "true"
-ROI_X1: int = int(os.getenv("ROI_X1", "100"))
-ROI_Y1: int = int(os.getenv("ROI_Y1", "180"))
-ROI_X2: int = int(os.getenv("ROI_X2", "1180"))
-ROI_Y2: int = int(os.getenv("ROI_Y2", "700"))
+# TẮT mặc định – detect toàn bộ frame, không giới hạn vùng
+ENABLE_ROI: bool = os.getenv("ENABLE_ROI", "false").lower() == "true"
+ROI_X1: int = int(os.getenv("ROI_X1", "0"))
+ROI_Y1: int = int(os.getenv("ROI_Y1", "0"))
+ROI_X2: int = int(os.getenv("ROI_X2", "1920"))
+ROI_Y2: int = int(os.getenv("ROI_Y2", "1080"))

@@ -11,15 +11,15 @@ import './assets/main.css'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: Dashboard, meta: { title: 'Dashboard' } },
+    { path: '/', component: Dashboard, meta: { title: 'Tổng quan' } },
     { path: '/upload', component: UploadAnalysis, meta: { title: 'Upload & Phân tích' } },
-    { path: '/violations', component: ViolationHistory, meta: { title: 'Lịch sử vi phạm' } },
+    { path: '/violations', component: ViolationHistory, meta: { title: 'Vi phạm giao thông' } },
     { path: '/history', component: DetectionHistory, meta: { title: 'Lịch sử phương tiện' } },
   ],
 })
 
 router.afterEach((to) => {
-  document.title = `${to.meta.title || 'Dashboard'} | Traffic Violation AI`
+  document.title = `${to.meta.title || 'Tổng quan'} | Giám sát Vi phạm GT`
 })
 
 const pinia = createPinia()

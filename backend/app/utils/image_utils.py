@@ -38,14 +38,75 @@ def resize_keep_aspect(
     img: np.ndarray,
     max_width: int = 1280,
     max_height: int = 720,
+    allow_upscale: bool = False,
 ) -> np.ndarray:
-    """Resize ảnh giữ nguyên tỉ lệ, không vượt quá max_width x max_height"""
+    """Resize ảnh giữ nguyên tỉ lệ, không vượt quá max_width x max_height.
+    Nếu allow_upscale=False (mặc định), chỉ giảm kích thước.
+    Nếu allow_upscale=True, cho phép phóng to frame nhỏ.
+    """
     h, w = img.shape[:2]
-    scale = min(max_width / w, max_height / h, 1.0)
-    if scale < 1.0:
+    scale = min(max_width / w, max_height / h)
+    if not allow_upscale:
+        scale = min(scale, 1.0)
+    if abs(scale - 1.0) > 0.01:
         new_w, new_h = int(w * scale), int(h * scale)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        interp = cv2.INTER_CUBIC if scale > 1.0 else cv2.INTER_AREA
+        img = cv2.resize(img, (new_w, new_h), interpolation=interp)
     return img
+
+
+def upscale_frame(
+    img: np.ndarray,
+    min_width: int = 960,
+    target_width: int = 1920,
+    max_height: int = 1440,
+) -> np.ndarray:
+    """
+    Upscale frame nhỏ bằng Bicubic interpolation.
+    Chỉ upscale nếu width hiện tại < min_width.
+    Giữ nguyên tỉ lệ, không vượt quá target_width × max_height.
+    """
+    h, w = img.shape[:2]
+    if w >= min_width:
+        return img  # Đã đủ lớn, không cần upscale
+
+    scale = min(target_width / w, max_height / h)
+    scale = max(scale, 1.0)  # Không bao giờ giảm
+    if scale <= 1.01:
+        return img
+
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    logger.info(f"Upscale frame: {w}x{h} → {new_w}x{new_h} (scale={scale:.2f})")
+    return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+
+def enhance_frame(img: np.ndarray) -> np.ndarray:
+    """
+    Tiền xử lý frame nhẹ nhàng để cải thiện chất lượng detect.
+    CHỈ nên bật khi video gốc quá tối hoặc contrast rất thấp.
+
+    Pipeline:
+    1. Bilateral filter – khử noise nhưng giữ cạnh
+    2. CLAHE nhẹ trên kênh L (LAB) – tăng tương phản cục bộ
+    3. Unsharp Masking rất nhẹ – tăng nét cạnh tối thiểu
+    """
+    # Bilateral filter: khử noise nhưng giữ biên cạnh sắc nét
+    denoised = cv2.bilateralFilter(img, d=5, sigmaColor=50, sigmaSpace=50)
+
+    # CLAHE nhẹ trên kênh L (giảm clipLimit để tránh amplify noise)
+    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+    l_ch = clahe.apply(l_ch)
+    enhanced = cv2.merge([l_ch, a_ch, b_ch])
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+    # Unsharp Masking rất nhẹ (tránh amplify compression artifacts)
+    blurred = cv2.GaussianBlur(enhanced, (0, 0), sigmaX=1.5)
+    enhanced = cv2.addWeighted(enhanced, 1.15, blurred, -0.15, 0)
+
+    return enhanced
 
 
 def vietnamese_to_ascii(text: str) -> str:
@@ -200,8 +261,6 @@ def calculate_containment_ratio(
     inter_area = inter_w * inter_h
 
     # Diện tích của hộp nhỏ
-    inner_w = max(0.0, x2_in - y1_in) # Chờ chút, x2_in - x1_in chứ không phải y1_in!
-    # Sửa:
     inner_w = max(0.0, x2_in - x1_in)
     inner_h = max(0.0, y2_in - y1_in)
     inner_area = inner_w * inner_h
