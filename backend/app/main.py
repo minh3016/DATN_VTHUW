@@ -80,6 +80,11 @@ from .database import (
     create_analysis_job,
     update_analysis_job,
     get_analysis_job,
+    create_plate_detection,
+    get_plate_detections,
+    count_plate_detections,
+    delete_plate_detection,
+    get_plate_stats,
 )
 from .models import (
     DetectionCreate,
@@ -92,6 +97,8 @@ from .models import (
     WSMessage,
     VideoUploadResponse,
     AnalysisJobStatus,
+    PlateDetectionCreate,
+    PlateDetectionResponse,
 )
 from .websocket_manager import manager
 from .services.vehicle_detector import vehicle_detector
@@ -107,7 +114,7 @@ from .utils.image_utils import (
     upscale_frame,
     enhance_frame,
 )
-from .utils.evidence_storage import save_evidence, get_evidence_path
+from .utils.evidence_storage import save_evidence, get_evidence_path, save_plate_evidence
 
 logging.basicConfig(
     level=logging.INFO,
@@ -608,6 +615,52 @@ async def violation_stats(hours: int = Query(24, ge=1)):
 
 
 # ---------------------------------------------------------------------------
+# Plates API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/plates", response_model=dict)
+async def get_plates_api(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    plate_text: Optional[str] = None,
+    camera_id: Optional[str] = None,
+    is_valid: Optional[bool] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
+):
+    plates_list = await get_plate_detections(
+        skip=skip,
+        limit=limit,
+        plate_text=plate_text,
+        camera_id=camera_id,
+        is_valid=is_valid,
+        source_file=source_file,
+        source_type=source_type
+    )
+    total = await count_plate_detections(
+        plate_text=plate_text,
+        camera_id=camera_id,
+        is_valid=is_valid,
+        source_file=source_file,
+        source_type=source_type
+    )
+    return {"plates": plates_list, "total": total, "skip": skip, "limit": limit}
+
+
+@app.delete("/api/plates/{plate_id}")
+async def remove_plate(plate_id: str):
+    success = await delete_plate_detection(plate_id)
+    if not success:
+        raise HTTPException(404, "Plate not found")
+    return {"message": "Plate deleted"}
+
+
+@app.get("/api/plates/stats")
+async def plates_stats(hours: int = Query(24, ge=1)):
+    return await get_plate_stats(hours)
+
+
+# ---------------------------------------------------------------------------
 # Single frame analysis
 # ---------------------------------------------------------------------------
 
@@ -688,6 +741,34 @@ async def analyze_image(file: UploadFile = File(...)):
         if viol_id:
             saved_violation_ids.append(viol_id)
 
+    # Save plate detections to DB
+    saved_plate_ids = []
+    for plate in result.get("plates", []):
+        if not plate.get("is_valid_plate"):
+            continue
+            
+        plate_id = uuid.uuid4().hex[:12]
+        plate_ev_path = None
+        if plate.get("plate_image_base64"):
+            plate_crop = base64_to_numpy(plate["plate_image_base64"])
+            plate_ev_path = save_plate_evidence(plate_crop, f"img_plate_{plate_id}")
+            
+        p_id = await create_plate_detection(PlateDetectionCreate(
+            plate_text=plate["normalized_text"],
+            plate_text_raw=plate["plate_text"],
+            province_code=plate.get("normalized_text", "")[:2] if len(plate.get("normalized_text", "")) >= 2 else "",
+            province_name=plate.get("province_name", ""),
+            is_valid=True,
+            avg_confidence=plate["avg_ocr_confidence"],
+            camera_id="UPLOAD_IMG",
+            source_type="image",
+            source_file=file.filename,
+            evidence_path=evidence_path,
+            plate_evidence_path=plate_ev_path,
+        ))
+        if p_id:
+            saved_plate_ids.append(p_id)
+
     # Xóa annotated_frame numpy khỏi response (không JSON serializable)
     result.pop("annotated_frame", None)
 
@@ -695,6 +776,7 @@ async def analyze_image(file: UploadFile = File(...)):
     result["source_file"] = file.filename
     result["saved_detection_ids"] = saved_detection_ids
     result["saved_violation_ids"] = saved_violation_ids
+    result["saved_plate_ids"] = saved_plate_ids
 
     return result
 
@@ -978,6 +1060,31 @@ async def _analyze_video_task(job_id: str, video_path: str):
                     unique_plates.add(p_text)
                     plates_total += 1
 
+                    if plate.get("is_valid_plate"):
+                        plate_id = uuid.uuid4().hex[:12]
+                        plate_ev_path = None
+                        if plate.get("plate_image_base64"):
+                            plate_crop = base64_to_numpy(plate["plate_image_base64"])
+                            plate_ev_path = save_plate_evidence(plate_crop, f"vid_{job_id}_{processed}_plate_{plate_id}")
+                            
+                        evidence_path = save_evidence(
+                            evidence_source, f"vid_{job_id}_{processed}_full_plate_{plate_id}"
+                        )
+
+                        await create_plate_detection(PlateDetectionCreate(
+                            plate_text=plate["normalized_text"],
+                            plate_text_raw=plate["plate_text"],
+                            province_code=plate.get("normalized_text", "")[:2] if len(plate.get("normalized_text", "")) >= 2 else "",
+                            province_name=plate.get("province_name", ""),
+                            is_valid=True,
+                            avg_confidence=plate["avg_ocr_confidence"],
+                            camera_id="UPLOAD_VID",
+                            source_type="upload",
+                            source_file=Path(video_path).name,
+                            evidence_path=evidence_path,
+                            plate_evidence_path=plate_ev_path,
+                        ))
+
             # Debug log every 30 frames
             if processed % 30 == 0:
                 logger.info(f"  Frame {processed}: {frame_vehicles} vehicles, "
@@ -1221,6 +1328,34 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                             camera_id=camera_id,
                             source_type="stream",
                             evidence_path=evidence_path,
+                        ))
+
+                # Save plates
+                if result.get("plates"):
+                    for plate in result["plates"]:
+                        if not plate.get("is_valid_plate"):
+                            continue
+                            
+                        plate_id = uuid.uuid4().hex[:12]
+                        plate_ev_path = None
+                        if plate.get("plate_image_base64"):
+                            plate_crop = base64_to_numpy(plate["plate_image_base64"])
+                            plate_ev_path = save_plate_evidence(plate_crop, f"stream_{camera_id}_{frame_idx}_plate_{plate_id}")
+                            
+                        evidence_path = save_evidence(
+                            evidence_source, f"stream_{camera_id}_{frame_idx}_full_plate_{plate_id}"
+                        )
+                        await create_plate_detection(PlateDetectionCreate(
+                            plate_text=plate["normalized_text"],
+                            plate_text_raw=plate["plate_text"],
+                            province_code=plate.get("normalized_text", "")[:2] if len(plate.get("normalized_text", "")) >= 2 else "",
+                            province_name=plate.get("province_name", ""),
+                            is_valid=True,
+                            avg_confidence=plate["avg_ocr_confidence"],
+                            camera_id=camera_id,
+                            source_type="stream",
+                            evidence_path=evidence_path,
+                            plate_evidence_path=plate_ev_path,
                         ))
 
             await asyncio.sleep(0.01)

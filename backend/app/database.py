@@ -11,7 +11,7 @@ from pymongo import DESCENDING
 from bson import ObjectId
 
 from .config import MONGO_URI, MONGO_DB
-from .models import DetectionCreate, ViolationCreate
+from .models import DetectionCreate, ViolationCreate, PlateDetectionCreate
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,13 @@ async def _ensure_indexes() -> None:
     jobs = _db["analysis_jobs"]
     await jobs.create_index([("status", 1)])
     await jobs.create_index([("created_at", DESCENDING)])
+
+    # Plate detections indexes
+    plates = _db["plate_detections"]
+    await plates.create_index([("created_at", DESCENDING)])
+    await plates.create_index([("plate_text", 1)])
+    await plates.create_index([("camera_id", 1)])
+    await plates.create_index([("is_valid", 1)])
 
 
 # ---------------------------------------------------------------------------
@@ -348,3 +355,122 @@ async def get_analysis_job(job_id: str) -> Optional[dict]:
     if doc:
         doc["_id"] = str(doc["_id"])
     return doc
+
+
+# ---------------------------------------------------------------------------
+# CRUD – Plate Detections
+# ---------------------------------------------------------------------------
+
+async def create_plate_detection(data: PlateDetectionCreate) -> Optional[str]:
+    if _db is None:
+        return None
+    doc = data.model_dump()
+    doc["created_at"] = datetime.utcnow()
+    result = await _db["plate_detections"].insert_one(doc)
+    return str(result.inserted_id)
+
+async def get_plate_detections(
+    skip: int = 0,
+    limit: int = 50,
+    plate_text: Optional[str] = None,
+    camera_id: Optional[str] = None,
+    is_valid: Optional[bool] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
+) -> List[dict]:
+    if _db is None:
+        return []
+    query: dict = {}
+    if plate_text:
+        query["plate_text"] = {"$regex": plate_text, "$options": "i"}
+    if camera_id:
+        query["camera_id"] = camera_id
+    if is_valid is not None:
+        query["is_valid"] = is_valid
+    if source_file:
+        query["source_file"] = source_file
+    if source_type:
+        query["source_type"] = source_type
+
+    cursor = (
+        _db["plate_detections"]
+        .find(query)
+        .sort("created_at", DESCENDING)
+        .skip(skip)
+        .limit(limit)
+    )
+    docs = await cursor.to_list(length=limit)
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+        doc["id"] = doc["_id"]  # alias for frontend
+    return docs
+
+async def count_plate_detections(
+    plate_text: Optional[str] = None,
+    camera_id: Optional[str] = None,
+    is_valid: Optional[bool] = None,
+    source_file: Optional[str] = None,
+    source_type: Optional[str] = None,
+) -> int:
+    if _db is None:
+        return 0
+    query: dict = {}
+    if plate_text:
+        query["plate_text"] = {"$regex": plate_text, "$options": "i"}
+    if camera_id:
+        query["camera_id"] = camera_id
+    if is_valid is not None:
+        query["is_valid"] = is_valid
+    if source_file:
+        query["source_file"] = source_file
+    if source_type:
+        query["source_type"] = source_type
+    return await _db["plate_detections"].count_documents(query)
+
+async def delete_plate_detection(plate_id: str) -> bool:
+    if _db is None:
+        return False
+    result = await _db["plate_detections"].delete_one({"_id": ObjectId(plate_id)})
+    return result.deleted_count > 0
+
+async def get_plate_stats(hours: int = 24) -> dict:
+    """Thống kê biển số theo tỉnh và hợp lệ/không"""
+    if _db is None:
+        return {}
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    pipeline_valid = [
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": "$is_valid", "count": {"$sum": 1}}},
+    ]
+    cursor_valid = _db["plate_detections"].aggregate(pipeline_valid)
+    result_valid = await cursor_valid.to_list(length=100)
+    
+    valid_count = 0
+    invalid_count = 0
+    for item in result_valid:
+        if item["_id"] is True:
+            valid_count = item["count"]
+        elif item["_id"] is False:
+            invalid_count = item["count"]
+
+    pipeline_prov = [
+        {"$match": {"created_at": {"$gte": since}, "province_name": {"$ne": ""}}},
+        {"$group": {"_id": "$province_name", "count": {"$sum": 1}}},
+    ]
+    cursor_prov = _db["plate_detections"].aggregate(pipeline_prov)
+    result_prov = await cursor_prov.to_list(length=100)
+    by_province = {item["_id"]: item["count"] for item in result_prov if item["_id"]}
+
+    total = valid_count + invalid_count
+    return {
+        "period_hours": hours,
+        "period_start": since.isoformat(),
+        "period_end": datetime.utcnow().isoformat(),
+        "total_plates": total,
+        "valid_plates": valid_count,
+        "invalid_plates": invalid_count,
+        "unique_provinces": len(by_province),
+        "by_province": by_province,
+    }
+

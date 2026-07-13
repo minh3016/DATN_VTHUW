@@ -123,6 +123,7 @@ const navItems = [
   { path: '/upload', icon: 'upload-cloud', label: 'Upload & Phân tích', exact: false },
   { path: '/violations', icon: 'alert-triangle', label: 'Vi phạm giao thông', exact: false },
   { path: '/history', icon: 'car', label: 'Lịch sử phương tiện', exact: false },
+  { path: '/plates', icon: 'credit-card', label: 'Biển số xe', exact: false },
 ]
 
 const currentPageTitle = computed(() => {

@@ -6,6 +6,7 @@ import Dashboard from './views/Dashboard.vue'
 import UploadAnalysis from './views/UploadAnalysis.vue'
 import DetectionHistory from './views/DetectionHistory.vue'
 import ViolationHistory from './views/ViolationHistory.vue'
+import PlateHistory from './views/PlateHistory.vue'
 import './assets/main.css'
 
 const router = createRouter({
@@ -15,6 +16,7 @@ const router = createRouter({
     { path: '/upload', component: UploadAnalysis, meta: { title: 'Upload & Phân tích' } },
     { path: '/violations', component: ViolationHistory, meta: { title: 'Vi phạm giao thông' } },
     { path: '/history', component: DetectionHistory, meta: { title: 'Lịch sử phương tiện' } },
+    { path: '/plates', component: PlateHistory, meta: { title: 'Biển số xe' } },
   ],
 })
 

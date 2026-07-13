@@ -26,6 +26,7 @@ from ..config import (
 from ..models import BoundingBox, PlateDetection
 from ..utils.yolo_wrapper import YOLOWrapper
 from ..utils.image_utils import numpy_to_base64
+from ..utils.plate_validator import get_plate_info
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,9 @@ class PlateRecognizer:
             except Exception:
                 pass
 
+            # Validate and normalize plate text
+            plate_info = get_plate_info(plate_text)
+
             detections.append(
                 PlateDetection(
                     bbox=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, conf=det_conf),
@@ -157,6 +161,9 @@ class PlateRecognizer:
                     char_confidences=char_confs,
                     avg_ocr_confidence=avg_conf,
                     plate_image_base64=plate_b64,
+                    is_valid_plate=plate_info["is_valid"],
+                    normalized_text=plate_info["normalized_text"],
+                    province_name=plate_info["province_name"],
                 )
             )
 

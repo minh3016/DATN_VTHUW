@@ -70,6 +70,9 @@ class PlateDetection(BaseModel):
     char_confidences: List[float] = []     # Confidence của từng ký tự OCR
     avg_ocr_confidence: float = 0.0        # Confidence trung bình OCR
     plate_image_base64: Optional[str] = None  # Ảnh crop biển số (base64)
+    is_valid_plate: bool = False           # Biển số có hợp lệ theo chuẩn VN?
+    normalized_text: str = ""              # Biển số sau normalize
+    province_name: str = ""                # Tên tỉnh/TP
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +140,34 @@ class ViolationCreate(BaseModel):
 
 
 class ViolationResponse(ViolationCreate):
+    id: str
+    created_at: datetime
+
+    class Config:
+        populate_by_name = True
+
+
+# ---------------------------------------------------------------------------
+# Plate Detection record (for DB persistence – biển số xe)
+# ---------------------------------------------------------------------------
+
+class PlateDetectionCreate(BaseModel):
+    """Lưu lịch sử phát hiện biển số"""
+    plate_text: str                      # Biển số đã validate/normalize
+    plate_text_raw: str = ""             # Biển số OCR gốc
+    province_code: str = ""              # Mã tỉnh
+    province_name: str = ""              # Tên tỉnh
+    is_valid: bool = True                # Biển số hợp lệ?
+    avg_confidence: float = 0.0          # Confidence trung bình OCR
+    vehicle_class: Optional[str] = None  # Loại xe liên quan
+    camera_id: str = "CAM_01"
+    source_type: str = "stream"
+    source_file: Optional[str] = None
+    evidence_path: Optional[str] = None        # Ảnh full frame có bbox biển số
+    plate_evidence_path: Optional[str] = None  # Ảnh crop biển số có bbox ký tự
+
+
+class PlateDetectionResponse(PlateDetectionCreate):
     id: str
     created_at: datetime
 

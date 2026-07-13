@@ -130,9 +130,16 @@
               <div class="det-grid">
                 <div v-for="(plate, i) in imageResult.plates" :key="'p'+i" class="det-item det-item--plate">
                   <span class="det-idx det-idx--plate">{{ i + 1 }}</span>
-                  <span class="plate-text">{{ plate.plate_text || 'Không nhận dạng' }}</span>
+                  <div class="flex flex-col gap-1" style="flex:1">
+                    <div class="flex items-center gap-2">
+                      <span class="plate-text" :class="{ 'text-danger': !plate.is_valid_plate }">{{ plate.normalized_text || plate.plate_text || 'Không nhận dạng' }}</span>
+                      <span v-if="plate.is_valid_plate" class="badge badge--success" style="font-size:0.7rem;padding:2px 6px">Hợp lệ</span>
+                      <span v-else class="badge badge--danger" style="font-size:0.7rem;padding:2px 6px" :title="'Raw OCR: ' + plate.plate_text">Không hợp lệ</span>
+                    </div>
+                    <span v-if="plate.province_name" style="font-size:0.75rem;color:var(--text-muted)">{{ plate.province_name }}</span>
+                  </div>
                   <span class="conf-bar__label">{{ plate.avg_ocr_confidence ? (plate.avg_ocr_confidence * 100).toFixed(0) + '%' : '—' }}</span>
-                  <img v-if="plate.plate_image_base64" :src="'data:image/jpeg;base64,' + plate.plate_image_base64" class="plate-thumb-img" alt="plate" />
+                  <img v-if="plate.plate_image_base64" :src="'data:image/jpeg;base64,' + plate.plate_image_base64" class="plate-thumb-img" style="cursor:zoom-in" alt="plate" @click="showPlateEvidence(plate)" title="Click để xem chi tiết ký tự" />
                 </div>
               </div>
             </div>
@@ -294,6 +301,28 @@
         </div>
       </div>
     </div>
+    <!-- Plate Evidence Modal -->
+    <div v-if="plateEvidenceModalItem" class="modal-overlay" @click.self="plateEvidenceModalItem = null">
+      <div class="modal-content" style="max-width:500px">
+        <div class="modal-header">
+          <h3>Chi tiết nhận diện biển số</h3>
+          <button @click="plateEvidenceModalItem = null" class="modal-close">✕</button>
+        </div>
+        <div class="modal-body text-center">
+          <img :src="'data:image/jpeg;base64,' + plateEvidenceModalItem.plate_image_base64" alt="Plate Crop" style="max-height:150px;width:auto;margin:0 auto;border-radius:var(--radius-md);display:block" />
+          <div class="evidence-details mt-4 text-left" style="margin-top: 16px;">
+            <p><strong>Biển số đã chuẩn hóa:</strong> <span class="plate-text">{{ plateEvidenceModalItem.normalized_text || plateEvidenceModalItem.plate_text }}</span></p>
+            <p><strong>OCR Gốc:</strong> <span style="font-family: monospace;">{{ plateEvidenceModalItem.plate_text }}</span></p>
+            <p><strong>Trạng thái:</strong> 
+              <span v-if="plateEvidenceModalItem.is_valid_plate" class="text-success font-bold">Hợp lệ</span>
+              <span v-else class="text-danger font-bold">Không hợp lệ</span>
+            </p>
+            <p v-if="plateEvidenceModalItem.province_name"><strong>Tỉnh/TP:</strong> {{ plateEvidenceModalItem.province_name }}</p>
+            <p><strong>Độ tin cậy:</strong> {{ plateEvidenceModalItem.avg_ocr_confidence ? (plateEvidenceModalItem.avg_ocr_confidence * 100).toFixed(1) + '%' : '—' }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -331,6 +360,7 @@ const statusText = ref('Chờ xử lý')
 const videoViolations = ref([])
 const videoDetections = ref([])
 const evidenceModalItem = ref(null)
+const plateEvidenceModalItem = ref(null)
 
 let pollTimer = null
 let ws = null
@@ -402,7 +432,7 @@ function resetAll() {
   imageFile.value = null; imagePreview.value = null; imageResult.value = null
   imageLoading.value = false; dragOver.value = false; showImageLightbox.value = false
   currentJob.value = null; jobStatus.value = null; latestFrame.value = null
-  videoViolations.value = []; videoDetections.value = []; evidenceModalItem.value = null
+  videoViolations.value = []; videoDetections.value = []; evidenceModalItem.value = null; plateEvidenceModalItem.value = null
   statusText.value = 'Chờ xử lý'; stopPolling()
   if (ws) { ws.close(); ws = null }
 }
@@ -410,6 +440,8 @@ function resetAll() {
 function formatSize(b) { if (!b) return ''; return b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/(1024*1024)).toFixed(1)} MB` }
 function formatDuration(s) { if (!s) return ''; return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}` }
 function formatTime(ts) { if (!ts) return '—'; return new Date(ts).toLocaleString('vi-VN', { hour12: false }) }
+
+function showPlateEvidence(plate) { plateEvidenceModalItem.value = plate }
 
 onUnmounted(() => { stopPolling(); if (ws) ws.close() })
 </script>

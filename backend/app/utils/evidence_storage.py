@@ -54,6 +54,35 @@ def save_evidence(frame: np.ndarray, violation_id: str = None,
         return ""
 
 
+def save_plate_evidence(plate_crop: np.ndarray, plate_id: str = None,
+                        quality: int = 90) -> str:
+    """
+    Lưu ảnh crop biển số (có bbox ký tự) ra disk.
+    """
+    if plate_id is None:
+        plate_id = uuid.uuid4().hex[:12]
+
+    date_dir = datetime.now().strftime("%Y-%m-%d")
+    dir_path = EVIDENCE_DIR / date_dir
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    filename = f"plate_{plate_id}.jpg"
+    filepath = dir_path / filename
+
+    try:
+        cv2.imwrite(
+            str(filepath), plate_crop,
+            [cv2.IMWRITE_JPEG_QUALITY, quality]
+        )
+        # Return relative path (from backend dir)
+        rel_path = f"evidence/{date_dir}/{filename}"
+        logger.debug(f"Plate evidence saved: {rel_path}")
+        return rel_path
+    except Exception as e:
+        logger.error(f"Failed to save plate evidence: {e}")
+        return ""
+
+
 def get_evidence_path(relative_path: str) -> Path:
     """Convert relative evidence path to absolute path."""
     # Handles both "evidence/2026-06-04/viol_abc.jpg" and "2026-06-04/viol_abc.jpg"

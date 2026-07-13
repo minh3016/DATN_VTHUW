@@ -44,6 +44,16 @@ export const deleteViolation = (id) =>
 export const getViolationStats = (hours = 24) =>
   api.get('/api/violations/stats', { params: { hours } })
 
+// ── Plates ───────────────────────────────────────────────────
+export const getPlateDetections = (params = {}) =>
+  api.get('/api/plates', { params })
+
+export const deletePlateDetection = (id) =>
+  api.delete(`/api/plates/${id}`)
+
+export const getPlateStats = (hours = 24) =>
+  api.get('/api/plates/stats', { params: { hours } })
+
 // ── Analyze Image (upload ảnh) ────────────────────────────────
 export const analyzeImage = (file, onProgress = null) => {
   const formData = new FormData()
