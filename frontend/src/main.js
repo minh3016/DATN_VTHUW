@@ -13,7 +13,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: Dashboard, meta: { title: 'Tổng quan' } },
-    { path: '/upload', component: UploadAnalysis, meta: { title: 'Upload & Phân tích' } },
+    { path: '/upload', component: UploadAnalysis, meta: { title: 'Phân tích Video' } },
     { path: '/violations', component: ViolationHistory, meta: { title: 'Vi phạm giao thông' } },
     { path: '/history', component: DetectionHistory, meta: { title: 'Lịch sử phương tiện' } },
     { path: '/plates', component: PlateHistory, meta: { title: 'Biển số xe' } },

@@ -54,20 +54,7 @@ export const deletePlateDetection = (id) =>
 export const getPlateStats = (hours = 24) =>
   api.get('/api/plates/stats', { params: { hours } })
 
-// ── Analyze Image (upload ảnh) ────────────────────────────────
-export const analyzeImage = (file, onProgress = null) => {
-  const formData = new FormData()
-  formData.append('file', file)
-  return api.post('/api/analyze/image', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 120000,
-    onUploadProgress: (e) => {
-      if (onProgress && e.total) {
-        onProgress(Math.round((e.loaded / e.total) * 100))
-      }
-    },
-  })
-}
+// ── (Image analysis removed) ──────────────────────────────────
 
 // ── Video Upload & Analysis ───────────────────────────────────
 export const uploadVideo = (file, onProgress = null) => {
@@ -84,11 +71,20 @@ export const uploadVideo = (file, onProgress = null) => {
   })
 }
 
-export const startAnalysis = (jobId) =>
-  api.post(`/api/upload/${jobId}/analyze`)
+export const startAnalysis = (jobId, frameSkip = 1) =>
+  api.post(`/api/upload/${jobId}/analyze`, null, { params: { frame_skip: frameSkip } })
 
 export const getAnalysisStatus = (jobId) =>
   api.get(`/api/upload/${jobId}/status`)
+
+export const pauseAnalysis = (jobId) =>
+  api.post(`/api/upload/${jobId}/pause`)
+
+export const resumeAnalysis = (jobId) =>
+  api.post(`/api/upload/${jobId}/resume`)
+
+export const seekAnalysis = (jobId, frame) =>
+  api.post(`/api/upload/${jobId}/seek`, null, { params: { frame } })
 
 // ── Evidence ──────────────────────────────────────────────────
 export const getEvidenceUrl = (evidencePath) => {

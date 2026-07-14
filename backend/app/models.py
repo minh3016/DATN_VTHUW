@@ -237,3 +237,4 @@ class AnalysisJobStatus(BaseModel):
     counts_by_category: Dict[str, int] = {}
     counts_by_violation: Dict[str, int] = {}
     error_message: Optional[str] = None
+    frame_skip: int = 1

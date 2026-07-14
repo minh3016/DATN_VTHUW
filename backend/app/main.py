@@ -130,6 +130,11 @@ _cameras: Dict[str, dict] = {}
 # Analysis job tasks
 _analysis_tasks: Dict[str, asyncio.Task] = {}
 
+# Pause/Resume control: asyncio.Event per job (set = running, clear = paused)
+_analysis_running_events: Dict[str, asyncio.Event] = {}
+# Seek control: target frame index per job (None = no seek)
+_analysis_seek_targets: Dict[str, Optional[int]] = {}
+
 
 # ---------------------------------------------------------------------------
 # App lifecycle
@@ -242,6 +247,7 @@ def _process_frame(
         if (roi_x1 <= xc <= roi_x2) and (roi_y1 <= yc_center <= roi_y2):
             return True
         return False
+
 
     # Vẽ khung ROI nếu bật
     if ENABLE_ROI:
@@ -676,109 +682,6 @@ async def analyze_frame(payload: dict):
     return result
 
 
-@app.post("/api/analyze/image")
-async def analyze_image(file: UploadFile = File(...)):
-    """Upload 1 ảnh để phân tích (vehicles + violations + plates)."""
-    # Validate file type
-    allowed = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-    ext = Path(file.filename).suffix.lower()
-    if ext not in allowed:
-        raise HTTPException(400, f"Unsupported image format: {ext}. Allowed: {allowed}")
-
-    # Read image
-    contents = await file.read()
-    if len(contents) > 20 * 1024 * 1024:  # 20MB max
-        raise HTTPException(400, "Image too large. Max: 20MB")
-
-    # Decode image
-    nparr = np.frombuffer(contents, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(400, "Cannot decode image")
-
-    frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
-
-    # Process (upscale + enhance sẽ được thực hiện bên trong _process_frame)
-    result = _process_frame(frame, camera_id="UPLOAD_IMG")
-
-    # Save evidence (annotated image có bounding box)
-    evidence_id = uuid.uuid4().hex[:12]
-    annotated_frame = result.get("annotated_frame")
-    if annotated_frame is not None and SAVE_ANNOTATED_EVIDENCE:
-        evidence_path = save_evidence(annotated_frame, f"img_{evidence_id}")
-    else:
-        evidence_path = save_evidence(frame, f"img_{evidence_id}")
-
-    # Save detections to DB
-    saved_detection_ids = []
-    for v in result.get("vehicles", []):
-        det_id = await create_detection(DetectionCreate(
-            vehicle_class=v["class_name"],
-            category=v["category"],
-            confidence=v["bbox"]["conf"],
-            camera_id="UPLOAD_IMG",
-            source_type="image",
-            source_file=file.filename,
-            evidence_path=evidence_path,
-        ))
-        if det_id:
-            saved_detection_ids.append(det_id)
-
-    # Save violations to DB
-    saved_violation_ids = []
-    for viol in result.get("violations", []):
-        viol_id = await create_violation(ViolationCreate(
-            violation_type=viol["violation_type"],
-            violation_label=viol["violation_label"],
-            confidence=viol["bbox"]["conf"],
-            plate_text=viol.get("plate_text") or None,
-            vehicle_class=viol.get("vehicle_class") or None,
-            camera_id="UPLOAD_IMG",
-            source_type="image",
-            source_file=file.filename,
-            evidence_path=evidence_path,
-        ))
-        if viol_id:
-            saved_violation_ids.append(viol_id)
-
-    # Save plate detections to DB
-    saved_plate_ids = []
-    for plate in result.get("plates", []):
-        if not plate.get("is_valid_plate"):
-            continue
-            
-        plate_id = uuid.uuid4().hex[:12]
-        plate_ev_path = None
-        if plate.get("plate_image_base64"):
-            plate_crop = base64_to_numpy(plate["plate_image_base64"])
-            plate_ev_path = save_plate_evidence(plate_crop, f"img_plate_{plate_id}")
-            
-        p_id = await create_plate_detection(PlateDetectionCreate(
-            plate_text=plate["normalized_text"],
-            plate_text_raw=plate["plate_text"],
-            province_code=plate.get("normalized_text", "")[:2] if len(plate.get("normalized_text", "")) >= 2 else "",
-            province_name=plate.get("province_name", ""),
-            is_valid=True,
-            avg_confidence=plate["avg_ocr_confidence"],
-            camera_id="UPLOAD_IMG",
-            source_type="image",
-            source_file=file.filename,
-            evidence_path=evidence_path,
-            plate_evidence_path=plate_ev_path,
-        ))
-        if p_id:
-            saved_plate_ids.append(p_id)
-
-    # Xóa annotated_frame numpy khỏi response (không JSON serializable)
-    result.pop("annotated_frame", None)
-
-    result["evidence_path"] = evidence_path
-    result["source_file"] = file.filename
-    result["saved_detection_ids"] = saved_detection_ids
-    result["saved_violation_ids"] = saved_violation_ids
-    result["saved_plate_ids"] = saved_plate_ids
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -850,14 +753,27 @@ async def upload_video(file: UploadFile = File(...)):
     )
 
 
+MAX_CONCURRENT_ANALYSIS = 2  # Giới hạn phân tích song song tối đa
+
 @app.post("/api/upload/{job_id}/analyze")
-async def start_analysis(job_id: str):
+async def start_analysis(
+    job_id: str,
+    frame_skip: int = Query(1, ge=1, le=30, description="Tua nhanh: bỏ qua N-1 frame, chỉ phân tích mỗi frame thứ N"),
+):
     """Start background analysis of uploaded video."""
     job = await get_analysis_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     if job.get("status") == "processing":
         raise HTTPException(400, "Already processing")
+
+    # Kiểm tra số lượng video đang phân tích đồng thời
+    active_count = sum(1 for t in _analysis_tasks.values() if not t.done())
+    if active_count >= MAX_CONCURRENT_ANALYSIS:
+        raise HTTPException(
+            429,
+            f"Đang phân tích {active_count} video. Tối đa {MAX_CONCURRENT_ANALYSIS} video đồng thời. Vui lòng chờ."
+        )
 
     # Lấy đường dẫn file trực tiếp từ database đã lưu lúc upload để đảm bảo chính xác tuyệt đối
     video_path = job.get("filepath")
@@ -882,19 +798,25 @@ async def start_analysis(job_id: str):
     if video_path is None:
         raise HTTPException(404, "Video file not found")
 
+    # Setup pause control (default: running)
+    ev = asyncio.Event()
+    ev.set()  # running by default
+    _analysis_running_events[job_id] = ev
+
     # Start background task
     task = asyncio.create_task(
-        _analyze_video_task(job_id, video_path)
+        _analyze_video_task(job_id, video_path, user_frame_skip=frame_skip)
     )
     _analysis_tasks[job_id] = task
 
     await update_analysis_job(job_id, status="processing",
-                               started_at=datetime.utcnow())
+                               started_at=datetime.utcnow(),
+                               frame_skip=frame_skip)
 
-    return {"message": "Analysis started", "job_id": job_id}
+    return {"message": "Analysis started", "job_id": job_id, "frame_skip": frame_skip}
 
 
-async def _analyze_video_task(job_id: str, video_path: str):
+async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int = 1):
     """Background task: process video frame by frame with all AI modules."""
     try:
         cap = cv2.VideoCapture(video_path)
@@ -907,9 +829,9 @@ async def _analyze_video_task(job_id: str, video_path: str):
         total_original = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = total_original / original_fps
 
-        # Calculate frame skip for downsampling
-        frame_skip = max(1, int(original_fps / PROCESS_FPS))
-        total_process = int(duration * PROCESS_FPS)
+        # Calculate frame skip for downsampling + user fast-forward
+        frame_skip = max(1, int(original_fps / PROCESS_FPS)) * user_frame_skip
+        total_process = max(1, int(duration * PROCESS_FPS / user_frame_skip))
 
         logger.info(f"Video analysis started: {video_path}")
         logger.info(f"  FPS: {original_fps}, Total frames: {total_original}, "
@@ -951,6 +873,22 @@ async def _analyze_video_task(job_id: str, video_path: str):
             return max(iou, containment)
 
         while True:
+            # --- Pause check ---
+            running_event = _analysis_running_events.get(job_id)
+            if running_event and not running_event.is_set():
+                await update_analysis_job(job_id, status="paused")
+                await running_event.wait()  # Block until resumed
+                await update_analysis_job(job_id, status="processing")
+
+            # --- Seek check ---
+            seek_target = _analysis_seek_targets.pop(job_id, None)
+            if seek_target is not None:
+                target_raw_frame = seek_target * frame_skip
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_raw_frame)
+                frame_idx = target_raw_frame
+                processed = seek_target
+                logger.info(f"Seek job {job_id}: jumped to frame {seek_target} (raw {target_raw_frame})")
+
             ret, frame = cap.read()
             if not ret:
                 break
@@ -1153,6 +1091,8 @@ async def _analyze_video_task(job_id: str, video_path: str):
                                   error_message=str(e))
     finally:
         _analysis_tasks.pop(job_id, None)
+        _analysis_running_events.pop(job_id, None)
+        _analysis_seek_targets.pop(job_id, None)
 
 
 @app.get("/api/upload/{job_id}/status")
@@ -1174,7 +1114,49 @@ async def analysis_status(job_id: str):
         counts_by_category=job.get("counts_by_category", {}),
         counts_by_violation=job.get("counts_by_violation", {}),
         error_message=job.get("error_message"),
+        frame_skip=job.get("frame_skip", 1),
     )
+
+
+# ---------------------------------------------------------------------------
+# Pause / Resume / Seek controls
+# ---------------------------------------------------------------------------
+
+@app.post("/api/upload/{job_id}/pause")
+async def pause_analysis(job_id: str):
+    """Pause a running analysis."""
+    ev = _analysis_running_events.get(job_id)
+    if not ev:
+        raise HTTPException(404, "Job not running")
+    ev.clear()  # Pause
+    return {"message": "Paused", "job_id": job_id}
+
+
+@app.post("/api/upload/{job_id}/resume")
+async def resume_analysis(job_id: str):
+    """Resume a paused analysis."""
+    ev = _analysis_running_events.get(job_id)
+    if not ev:
+        raise HTTPException(404, "Job not running")
+    ev.set()  # Resume
+    return {"message": "Resumed", "job_id": job_id}
+
+
+@app.post("/api/upload/{job_id}/seek")
+async def seek_analysis(
+    job_id: str,
+    frame: int = Query(..., ge=0, description="Target processed frame index to seek to"),
+):
+    """Seek video analysis to a specific frame."""
+    task = _analysis_tasks.get(job_id)
+    if not task or task.done():
+        raise HTTPException(404, "Job not running")
+    _analysis_seek_targets[job_id] = frame
+    # If paused, resume briefly so the seek can take effect
+    ev = _analysis_running_events.get(job_id)
+    if ev and not ev.is_set():
+        ev.set()
+    return {"message": f"Seeking to frame {frame}", "job_id": job_id}
 
 
 # ---------------------------------------------------------------------------

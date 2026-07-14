@@ -2,285 +2,222 @@
   <div class="page-container">
     <div class="page-title-section">
       <div>
-        <h1>Upload & Phân tích</h1>
-        <p class="page-title-sub">Tải lên ảnh hoặc video để phát hiện vi phạm giao thông bằng AI YOLOv8n</p>
+        <h1>Phân tích Video</h1>
+        <p class="page-title-sub">Tải lên video để phát hiện vi phạm giao thông bằng AI YOLOv8n · Hỗ trợ nhiều video đồng thời</p>
       </div>
     </div>
 
-    <!-- Mode selector -->
-    <div class="mode-tabs">
-      <button class="mode-tab" :class="{ 'mode-tab--active': mode === 'image' }" @click="resetAll(); mode = 'image'">
-        <LucideIcon name="image" :size="16" />
-        Phân tích ảnh
-      </button>
-      <button class="mode-tab" :class="{ 'mode-tab--active': mode === 'video' }" @click="resetAll(); mode = 'video'">
-        <LucideIcon name="film" :size="16" />
-        Phân tích video
-      </button>
-    </div>
-
-    <!-- ============ IMAGE MODE ============ -->
-    <div v-if="mode === 'image'" class="mode-content">
-      <!-- Upload area -->
+    <!-- Upload zone + Settings -->
+    <div class="upload-settings-row">
+      <!-- Drop zone -->
       <div
-        v-if="!imageResult"
         class="drop-zone"
         :class="{ 'drop-zone--active': dragOver }"
         @dragover.prevent="dragOver = true"
         @dragleave="dragOver = false"
-        @drop.prevent="handleImageDrop"
-        @click="$refs.imageInput.click()"
+        @drop.prevent="handleDrop"
+        @click="$refs.fileInput.click()"
       >
-        <input ref="imageInput" type="file" accept="image/jpeg,image/png,image/bmp,image/webp" style="display:none" @change="handleImageSelect" />
-
-        <div v-if="imagePreview" class="preview-in-zone">
-          <img :src="imagePreview" alt="preview" class="preview-thumb" />
-          <div class="preview-info">
-            <span class="preview-name">{{ imageFile?.name }}</span>
-            <span class="preview-size">{{ formatSize(imageFile?.size) }}</span>
-          </div>
-          <button class="btn btn--primary" @click.stop="analyzeCurrentImage" :disabled="imageLoading">
-            <span v-if="imageLoading" class="spinner"></span>
-            <template v-else>
-              <LucideIcon name="scan" :size="16" />
-              Phân tích
-            </template>
-          </button>
-        </div>
-
-        <div v-else class="drop-content">
-          <div class="drop-icon-wrap">
-            <LucideIcon name="image-plus" :size="40" />
-          </div>
-          <p class="drop-title">Kéo thả ảnh vào đây</p>
-          <p class="drop-sub">hoặc nhấn để chọn file · JPG, PNG, BMP, WebP · Tối đa 20MB</p>
+        <input ref="fileInput" type="file" accept="video/mp4,video/avi,video/x-msvideo,video/quicktime,video/x-matroska" multiple style="display:none" @change="handleFileSelect" />
+        <div class="drop-content">
+          <div class="drop-icon-wrap"><LucideIcon name="film" :size="40" /></div>
+          <p class="drop-title">Kéo thả video vào đây</p>
+          <p class="drop-sub">hoặc nhấn để chọn file · MP4, AVI, MOV, MKV · Tối đa 10 phút · 500MB · Chọn nhiều file</p>
         </div>
       </div>
 
-      <!-- Upload progress -->
-      <div v-if="imageLoading" class="loading-card">
-        <span class="spinner spinner--lg"></span>
-        <p>Đang phân tích ảnh bằng 4 model AI...</p>
-      </div>
-
-      <!-- Image Result -->
-      <div v-if="imageResult" class="result-section animate-fade-in">
-        <div class="result-header">
-          <h2>Kết quả phân tích hình ảnh</h2>
-          <button class="btn btn--ghost" @click="resetAll">
-            <LucideIcon name="plus" :size="16" />
-            Upload ảnh mới
-          </button>
+      <!-- Speed slider -->
+      <div class="speed-panel">
+        <h3><LucideIcon name="gauge" :size="16" /> Tốc độ phân tích</h3>
+        <div class="speed-slider-wrap">
+          <input
+            type="range"
+            class="speed-slider"
+            :min="0"
+            :max="speedSteps.length - 1"
+            v-model.number="speedIndex"
+          />
+          <div class="speed-labels">
+            <span v-for="(s, i) in speedSteps" :key="s" class="speed-label" :class="{ 'speed-label--active': i === speedIndex }">
+              x{{ s }}
+            </span>
+          </div>
         </div>
-
-        <div class="results-split-layout">
-          <div class="results-visuals-col">
-            <!-- Annotated image -->
-            <div class="annotated-wrap" @click="showImageLightbox = true" title="Nhấn để phóng to">
-              <img v-if="imageResult.frame_base64" :src="`data:image/jpeg;base64,${imageResult.frame_base64}`" alt="Annotated" class="annotated-img" />
-            </div>
-
-            <!-- Stats cards -->
-            <div class="result-stats">
-              <div class="rs-card rs-card--blue">
-                <LucideIcon name="car" :size="20" />
-                <span class="rs-val">{{ imageResult.vehicle_count || 0 }}</span>
-                <span class="rs-label">Phương tiện</span>
-              </div>
-              <div class="rs-card rs-card--red">
-                <LucideIcon name="alert-triangle" :size="20" />
-                <span class="rs-val">{{ imageResult.violation_count || 0 }}</span>
-                <span class="rs-label">Vi phạm</span>
-              </div>
-              <div class="rs-card rs-card--yellow">
-                <LucideIcon name="credit-card" :size="20" />
-                <span class="rs-val">{{ imageResult.plate_count || 0 }}</span>
-                <span class="rs-label">Biển số</span>
-              </div>
-            </div>
-
-            <!-- Category breakdown -->
-            <div v-if="imageResult.counts_by_category" class="category-row">
-              <div v-for="(cnt, cat) in imageResult.counts_by_category" :key="cat" class="cat-chip" :class="`cat-chip--${cat}`">
-                <span class="cat-name">{{ catLabel(cat) }}</span>
-                <span class="cat-count">{{ cnt }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="results-lists-col">
-            <!-- Violations list -->
-            <div v-if="imageResult.violations?.length" class="detections-list violations-list">
-              <h3><LucideIcon name="alert-triangle" :size="16" /> Vi phạm giao thông</h3>
-              <div class="det-grid">
-                <div v-for="(viol, i) in imageResult.violations" :key="'v'+i" class="det-item det-item--violation">
-                  <div class="det-item__left">
-                    <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
-                    <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
-                    <span class="conf-bar__label">{{ (viol.bbox.conf * 100).toFixed(0) }}%</span>
-                  </div>
-                  <span v-if="viol.plate_text" class="plate-text" style="font-size:0.8rem">{{ viol.plate_text }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Plates list -->
-            <div v-if="imageResult.plates?.length" class="detections-list plates-list">
-              <h3><LucideIcon name="credit-card" :size="16" /> Biển số xe nhận diện</h3>
-              <div class="det-grid">
-                <div v-for="(plate, i) in imageResult.plates" :key="'p'+i" class="det-item det-item--plate">
-                  <span class="det-idx det-idx--plate">{{ i + 1 }}</span>
-                  <div class="flex flex-col gap-1" style="flex:1">
-                    <div class="flex items-center gap-2">
-                      <span class="plate-text" :class="{ 'text-danger': !plate.is_valid_plate }">{{ plate.normalized_text || plate.plate_text || 'Không nhận dạng' }}</span>
-                      <span v-if="plate.is_valid_plate" class="badge badge--success" style="font-size:0.7rem;padding:2px 6px">Hợp lệ</span>
-                      <span v-else class="badge badge--danger" style="font-size:0.7rem;padding:2px 6px" :title="'Raw OCR: ' + plate.plate_text">Không hợp lệ</span>
-                    </div>
-                    <span v-if="plate.province_name" style="font-size:0.75rem;color:var(--text-muted)">{{ plate.province_name }}</span>
-                  </div>
-                  <span class="conf-bar__label">{{ plate.avg_ocr_confidence ? (plate.avg_ocr_confidence * 100).toFixed(0) + '%' : '—' }}</span>
-                  <img v-if="plate.plate_image_base64" :src="'data:image/jpeg;base64,' + plate.plate_image_base64" class="plate-thumb-img" style="cursor:zoom-in" alt="plate" @click="showPlateEvidence(plate)" title="Click để xem chi tiết ký tự" />
-                </div>
-              </div>
-            </div>
-
-            <!-- Vehicle detection list -->
-            <div v-if="imageResult.vehicles?.length" class="detections-list">
-              <h3><LucideIcon name="car" :size="16" /> Phương tiện trong ROI</h3>
-              <div class="det-grid">
-                <div v-for="(v, i) in imageResult.vehicles" :key="i" class="det-item" :class="`det-item--${v.category}`">
-                  <span class="det-idx">{{ i + 1 }}</span>
-                  <span class="badge" :class="classBadge(v.class_name)">{{ classLabel(v.class_name) }}</span>
-                  <span class="conf-bar__label">{{ (v.bbox.conf * 100).toFixed(0) }}%</span>
-                  <span class="det-cat">{{ catLabel(v.category) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div class="speed-info">
+          <span class="speed-badge">x{{ currentSpeed }}</span>
+          <span class="speed-desc" v-if="currentSpeed === 1">Phân tích tất cả frame (chính xác nhất)</span>
+          <span class="speed-desc" v-else>Bỏ qua {{ currentSpeed - 1 }} frame, phân tích mỗi frame thứ {{ currentSpeed }} (nhanh gấp ~{{ currentSpeed }} lần)</span>
+        </div>
+        <div class="speed-note">
+          <LucideIcon name="info" :size="13" />
+          Tốc độ áp dụng cho video <strong>chưa bắt đầu</strong> phân tích. Tối đa 2 video phân tích đồng thời.
         </div>
       </div>
     </div>
 
-    <!-- ============ VIDEO MODE ============ -->
-    <div v-if="mode === 'video'" class="mode-content">
-      <div v-if="!currentJob" class="upload-section">
-        <VideoUploader @uploaded="handleVideoUploaded" @error="handleError" />
+    <!-- Video List -->
+    <div v-if="videoJobs.length" class="video-list-section">
+      <div class="video-list-header">
+        <h2><LucideIcon name="list-video" :size="18" /> Danh sách video ({{ videoJobs.length }})</h2>
+        <button v-if="videoJobs.length > 1" class="btn btn--ghost btn--sm" @click="clearAllCompleted">
+          <LucideIcon name="trash-2" :size="14" /> Xóa video đã hoàn tất
+        </button>
       </div>
 
-      <div v-if="currentJob" class="analysis-section">
-        <div class="job-card">
-          <div class="job-card__header">
-            <div class="job-info">
-              <h3><LucideIcon name="film" :size="18" /> {{ currentJob.filename }}</h3>
-              <span class="job-meta">
-                {{ formatSize(currentJob.file_size) }}
-                <span v-if="currentJob.duration_sec"> · {{ formatDuration(currentJob.duration_sec) }}</span>
-              </span>
+      <div class="video-cards">
+        <div v-for="(job, idx) in videoJobs" :key="job.id" class="video-card" :class="`video-card--${job.state}`">
+          <!-- Card Header -->
+          <div class="vc-header">
+            <div class="vc-info">
+              <div class="vc-title-row">
+                <span class="vc-idx">{{ idx + 1 }}</span>
+                <LucideIcon name="file-video" :size="18" />
+                <span class="vc-name">{{ job.filename }}</span>
+              </div>
+              <div class="vc-meta">
+                <span>{{ formatSize(job.file_size) }}</span>
+                <span v-if="job.duration_sec"> · {{ formatDuration(job.duration_sec) }}</span>
+                <span v-if="job.frame_skip > 1"> · Tua x{{ job.frame_skip }}</span>
+              </div>
             </div>
-            <div class="job-status" :class="`status--${jobStatus?.status || 'pending'}`">
-              {{ statusText }}
-            </div>
-          </div>
-
-          <div class="job-progress" v-if="jobStatus">
-            <div class="progress-bar">
-              <div class="progress-bar__fill" :style="{ width: Math.round((jobStatus.progress||0)*100) + '%' }"></div>
-            </div>
-            <div class="progress-text">
-              <span>{{ jobStatus.processed_frames||0 }}/{{ jobStatus.total_frames||'?' }} frames ({{ Math.round((jobStatus.progress||0)*100) }}%)</span>
-              <span class="progress-counts">
-                <LucideIcon name="car" :size="13" /> {{ jobStatus.vehicles_detected||0 }}
-                <LucideIcon name="alert-triangle" :size="13" /> {{ jobStatus.violations_detected||0 }}
-                <LucideIcon name="credit-card" :size="13" /> {{ jobStatus.plates_detected||0 }}
-              </span>
+            <div class="vc-status-actions">
+              <span class="vc-status-badge" :class="`status--${job.state}`">{{ stateLabel(job.state) }}</span>
+              <button v-if="job.state === 'pending' || job.state === 'uploaded'" class="btn--icon btn--icon-danger" @click="removeJob(idx)" title="Xóa">
+                <LucideIcon name="x" :size="16" />
+              </button>
             </div>
           </div>
 
-          <button v-if="!jobStatus || jobStatus.status === 'pending'" class="btn btn--primary btn--lg" style="width:100%" @click="startVideoAnalysis" :disabled="isStarting">
-            <LucideIcon name="play" :size="18" />
-            {{ isStarting ? 'Đang khởi tạo...' : 'Bắt đầu phân tích' }}
-          </button>
-        </div>
+          <!-- Upload progress -->
+          <div v-if="job.state === 'uploading'" class="vc-progress-section">
+            <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--upload" :style="{ width: job.uploadProgress + '%' }"></div></div>
+            <span class="vc-progress-text">Đang upload: {{ job.uploadProgress }}%</span>
+          </div>
 
-        <!-- Live preview -->
-        <div v-if="latestFrame" class="preview-section">
-          <h3>Xem trước xử lý</h3>
-          <img :src="'data:image/jpeg;base64,' + latestFrame" alt="Preview" class="annotated-img" />
-        </div>
+          <!-- Analysis progress + controls -->
+          <div v-if="job.state === 'processing' || job.state === 'paused'" class="vc-progress-section">
+            <div class="vc-controls-row">
+              <button class="btn--icon-control" @click="togglePause(job)" :title="job.paused ? 'Tiếp tục' : 'Tạm dừng'">
+                <LucideIcon :name="job.paused ? 'play' : 'pause'" :size="16" />
+              </button>
+              <div class="progress-bar" style="flex:1"><div class="progress-bar__fill" :style="{ width: Math.round((job.progress||0)*100) + '%' }"></div></div>
+              <span class="vc-pct">{{ Math.round((job.progress||0)*100) }}%</span>
+            </div>
+            <div class="vc-progress-details">
+              <span>{{ job.processed_frames||0 }}/{{ job.total_frames||'?' }} frames</span>
+              <span v-if="job.paused" class="vc-paused-badge"><LucideIcon name="pause" :size="12" /> Đã tạm dừng</span>
+              <span class="vc-live-stats">
+                <LucideIcon name="car" :size="13" /> {{ job.vehicles_detected||0 }}
+                <LucideIcon name="alert-triangle" :size="13" /> {{ job.violations_detected||0 }}
+                <LucideIcon name="credit-card" :size="13" /> {{ job.plates_detected||0 }}
+              </span>
+            </div>
 
-        <!-- Video results -->
-        <div v-if="jobStatus?.status === 'completed'" class="result-section animate-fade-in">
-          <div class="result-header">
-            <h2>Kết quả phân tích video</h2>
-            <button class="btn btn--ghost" @click="resetAll">
-              <LucideIcon name="plus" :size="16" />
-              Upload video mới
+            <!-- Frame seek slider -->
+            <div v-if="job.total_frames" class="vc-seek-section">
+              <label class="vc-seek-label"><LucideIcon name="skip-forward" :size="13" /> Tua đến frame:</label>
+              <div class="vc-seek-row">
+                <input
+                  type="range"
+                  class="vc-seek-slider"
+                  :min="0"
+                  :max="job.total_frames"
+                  :value="job.seekValue ?? job.processed_frames"
+                  @input="job.seekValue = Number($event.target.value)"
+                  @change="seekToFrame(job, Number($event.target.value))"
+                />
+                <span class="vc-seek-val">{{ job.seekValue ?? job.processed_frames }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live preview frame -->
+          <div v-if="(job.state === 'processing' || job.state === 'paused') && job.latestFrame" class="vc-preview">
+            <img :src="'data:image/jpeg;base64,' + job.latestFrame" alt="Preview" class="vc-preview-img" />
+          </div>
+
+          <!-- Actions: Start analysis -->
+          <div v-if="job.state === 'uploaded'" class="vc-actions">
+            <button class="btn btn--primary" @click="startJobAnalysis(job)" :disabled="job.starting">
+              <LucideIcon name="play" :size="16" />
+              {{ job.starting ? 'Đang khởi tạo...' : 'Bắt đầu phân tích' }}
             </button>
           </div>
 
-          <div class="results-split-layout">
-            <div class="results-visuals-col">
-              <div class="result-stats">
-                <div class="rs-card rs-card--blue"><LucideIcon name="car" :size="20" /><span class="rs-val">{{ jobStatus.vehicles_detected }}</span><span class="rs-label">Phương tiện</span></div>
-                <div class="rs-card rs-card--red"><LucideIcon name="alert-triangle" :size="20" /><span class="rs-val">{{ jobStatus.violations_detected || 0 }}</span><span class="rs-label">Vi phạm</span></div>
-                <div class="rs-card rs-card--yellow"><LucideIcon name="credit-card" :size="20" /><span class="rs-val">{{ jobStatus.plates_detected || 0 }}</span><span class="rs-label">Biển số</span></div>
-              </div>
-
-              <div v-if="jobStatus.counts_by_violation" class="category-row">
-                <span v-for="(cnt, vtype) in jobStatus.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype" style="padding:6px 14px;font-size:0.85rem">
-                  {{ violLabel(vtype) }}: {{ cnt }}
-                </span>
-              </div>
-              <div v-if="jobStatus.counts_by_class" class="category-row">
-                <span v-for="(cnt, cls) in jobStatus.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)" style="padding:6px 14px;font-size:0.85rem">
-                  {{ classLabel(cls) }}: {{ cnt }}
-                </span>
-              </div>
+          <!-- Completed results -->
+          <div v-if="job.state === 'completed'" class="vc-results">
+            <div class="vc-stats-row">
+              <div class="rs-card rs-card--blue"><LucideIcon name="car" :size="18" /><span class="rs-val">{{ job.vehicles_detected||0 }}</span><span class="rs-label">Phương tiện</span></div>
+              <div class="rs-card rs-card--red"><LucideIcon name="alert-triangle" :size="18" /><span class="rs-val">{{ job.violations_detected||0 }}</span><span class="rs-label">Vi phạm</span></div>
+              <div class="rs-card rs-card--yellow"><LucideIcon name="credit-card" :size="18" /><span class="rs-val">{{ job.plates_detected||0 }}</span><span class="rs-label">Biển số</span></div>
             </div>
 
-            <div class="results-lists-col">
-              <!-- Video Violations -->
-              <div v-if="videoViolations.length" class="detections-list violations-list">
-                <h3><LucideIcon name="alert-triangle" :size="16" /> Vi phạm phát hiện</h3>
+            <!-- Breakdown badges -->
+            <div v-if="job.counts_by_violation && Object.keys(job.counts_by_violation).length" class="vc-badges-row">
+              <span v-for="(cnt, vtype) in job.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype">
+                {{ violLabel(vtype) }}: {{ cnt }}
+              </span>
+            </div>
+            <div v-if="job.counts_by_class && Object.keys(job.counts_by_class).length" class="vc-badges-row">
+              <span v-for="(cnt, cls) in job.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)">
+                {{ classLabel(cls) }}: {{ cnt }}
+              </span>
+            </div>
+
+            <!-- Expandable results -->
+            <button class="btn btn--ghost btn--sm vc-expand-btn" @click="job.expanded = !job.expanded">
+              <LucideIcon :name="job.expanded ? 'chevron-up' : 'chevron-down'" :size="16" />
+              {{ job.expanded ? 'Thu gọn chi tiết' : 'Xem chi tiết vi phạm & phương tiện' }}
+            </button>
+
+            <div v-if="job.expanded" class="vc-detail-section animate-fade-in">
+              <!-- Violations -->
+              <div v-if="job.violations.length" class="detections-list violations-list">
+                <h3><LucideIcon name="alert-triangle" :size="16" /> Vi phạm phát hiện ({{ job.violations.length }})</h3>
                 <div class="det-grid">
-                  <div v-for="(viol, i) in videoViolations" :key="'vv'+i" class="det-item det-item--violation">
+                  <div v-for="(viol, i) in job.violations" :key="'vv'+i" class="det-item det-item--violation">
                     <div class="det-item__left">
                       <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
                       <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
                       <span class="conf-bar__label">{{ (viol.confidence * 100).toFixed(0) }}%</span>
                       <span v-if="viol.plate_text" class="plate-text" style="font-size:0.8rem">{{ viol.plate_text }}</span>
                     </div>
-                    <img v-if="viol.evidence_path" :src="getEvidenceUrl(viol.evidence_path)" class="evidence-thumb" @click="showVideoEvidence(viol)" title="Xem bằng chứng" />
+                    <img v-if="viol.evidence_path" :src="getEvidenceUrl(viol.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = viol" title="Xem bằng chứng" />
                   </div>
                 </div>
               </div>
 
-              <!-- Video Vehicles -->
-              <div v-if="videoDetections.length" class="detections-list">
-                <h3><LucideIcon name="car" :size="16" /> Phương tiện phát hiện</h3>
+              <!-- Vehicles -->
+              <div v-if="job.detections.length" class="detections-list">
+                <h3><LucideIcon name="car" :size="16" /> Phương tiện phát hiện ({{ job.detections.length }})</h3>
                 <div class="det-grid">
-                  <div v-for="(v, i) in videoDetections" :key="'vd'+i" class="det-item" :class="`det-item--${v.category}`">
+                  <div v-for="(v, i) in job.detections" :key="'vd'+i" class="det-item" :class="`det-item--${v.category}`">
                     <div class="det-item__left">
                       <span class="det-idx">{{ i + 1 }}</span>
                       <span class="badge" :class="classBadge(v.vehicle_class)">{{ classLabel(v.vehicle_class) }}</span>
                       <span class="conf-bar__label">{{ (v.confidence * 100).toFixed(0) }}%</span>
                     </div>
-                    <img v-if="v.evidence_path" :src="getEvidenceUrl(v.evidence_path)" class="evidence-thumb" @click="showVideoEvidence(v)" title="Xem ảnh" />
+                    <img v-if="v.evidence_path" :src="getEvidenceUrl(v.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = v" title="Xem ảnh" />
                   </div>
                 </div>
               </div>
             </div>
           </div>
+
+          <!-- Error state -->
+          <div v-if="job.state === 'error'" class="vc-error">
+            <LucideIcon name="alert-circle" :size="16" />
+            <span>{{ job.error_message || 'Lỗi không xác định' }}</span>
+            <button class="btn btn--ghost btn--sm" @click="retryJob(job)">Thử lại</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Image Lightbox -->
-    <div v-if="showImageLightbox && imageResult?.frame_base64" class="modal-overlay" @click.self="showImageLightbox = false">
-      <div class="lightbox-content">
-        <img :src="`data:image/jpeg;base64,${imageResult.frame_base64}`" alt="Full size" />
-        <button class="modal-close" @click="showImageLightbox = false">✕</button>
-      </div>
+    <!-- Empty state -->
+    <div v-if="!videoJobs.length" class="empty-state">
+      <LucideIcon name="video-off" :size="48" />
+      <p>Chưa có video nào. Hãy tải lên video để bắt đầu phân tích.</p>
     </div>
 
     <!-- Evidence Modal -->
@@ -301,261 +238,519 @@
         </div>
       </div>
     </div>
-    <!-- Plate Evidence Modal -->
-    <div v-if="plateEvidenceModalItem" class="modal-overlay" @click.self="plateEvidenceModalItem = null">
-      <div class="modal-content" style="max-width:500px">
-        <div class="modal-header">
-          <h3>Chi tiết nhận diện biển số</h3>
-          <button @click="plateEvidenceModalItem = null" class="modal-close">✕</button>
-        </div>
-        <div class="modal-body text-center">
-          <img :src="'data:image/jpeg;base64,' + plateEvidenceModalItem.plate_image_base64" alt="Plate Crop" style="max-height:150px;width:auto;margin:0 auto;border-radius:var(--radius-md);display:block" />
-          <div class="evidence-details mt-4 text-left" style="margin-top: 16px;">
-            <p><strong>Biển số đã chuẩn hóa:</strong> <span class="plate-text">{{ plateEvidenceModalItem.normalized_text || plateEvidenceModalItem.plate_text }}</span></p>
-            <p><strong>OCR Gốc:</strong> <span style="font-family: monospace;">{{ plateEvidenceModalItem.plate_text }}</span></p>
-            <p><strong>Trạng thái:</strong> 
-              <span v-if="plateEvidenceModalItem.is_valid_plate" class="text-success font-bold">Hợp lệ</span>
-              <span v-else class="text-danger font-bold">Không hợp lệ</span>
-            </p>
-            <p v-if="plateEvidenceModalItem.province_name"><strong>Tỉnh/TP:</strong> {{ plateEvidenceModalItem.province_name }}</p>
-            <p><strong>Độ tin cậy:</strong> {{ plateEvidenceModalItem.avg_ocr_confidence ? (plateEvidenceModalItem.avg_ocr_confidence * 100).toFixed(1) + '%' : '—' }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
-import VideoUploader from '@/components/VideoUploader.vue'
+import { ref, computed, onUnmounted, reactive } from 'vue'
 import LucideIcon from '@/components/LucideIcon.vue'
 import {
-  analyzeImage, startAnalysis, getAnalysisStatus,
+  uploadVideo, startAnalysis, getAnalysisStatus,
+  pauseAnalysis, resumeAnalysis, seekAnalysis,
   createWebSocket, getViolations, getDetections, getEvidenceUrl
 } from '@/api/index.js'
 
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
 const CLASS_BADGES = { car: 'badge--success', truck: 'badge--warning', bus: 'badge--info', motorcycle: 'badge--danger' }
-const CAT_LABELS = { oto: 'Xe ô tô', xe_may: 'Xe máy' }
 const VIOL_LABELS = { no_helmet: 'Không đội MBH', no_seatbelt: 'Không thắt dây', using_phone: 'Dùng ĐT' }
 function classLabel(c) { return CLASS_LABELS[c] || c }
 function classBadge(c) { return CLASS_BADGES[c] || 'badge--info' }
-function catLabel(c) { return CAT_LABELS[c] || c }
 function violLabel(v) { return VIOL_LABELS[v] || v }
+function stateLabel(s) {
+  const map = { pending: 'Chờ upload', uploading: 'Đang upload', uploaded: 'Chờ phân tích', processing: 'Đang phân tích', paused: 'Tạm dừng', completed: 'Hoàn tất', error: 'Lỗi' }
+  return map[s] || s
+}
 
-const mode = ref('image')
-const imageFile = ref(null)
-const imagePreview = ref(null)
-const imageResult = ref(null)
-const imageLoading = ref(false)
+// Speed slider
+const speedSteps = [1, 2, 3, 5, 10, 15, 20, 30]
+const speedIndex = ref(0)
+const currentSpeed = computed(() => speedSteps[speedIndex.value])
+
+// Video jobs list
+const videoJobs = ref([])
 const dragOver = ref(false)
-const showImageLightbox = ref(false)
-
-const currentJob = ref(null)
-const jobStatus = ref(null)
-const latestFrame = ref(null)
-const isStarting = ref(false)
-const statusText = ref('Chờ xử lý')
-const videoViolations = ref([])
-const videoDetections = ref([])
 const evidenceModalItem = ref(null)
-const plateEvidenceModalItem = ref(null)
 
-let pollTimer = null
+// Poll timers per job
+const pollTimers = {}
+
+// WebSocket
 let ws = null
 
-function handleImageSelect(e) { const f = e.target.files[0]; if (f) setImageFile(f) }
-function handleImageDrop(e) { dragOver.value = false; const f = e.dataTransfer.files[0]; if (f && f.type.startsWith('image/')) setImageFile(f) }
-function setImageFile(f) { imageFile.value = f; imagePreview.value = URL.createObjectURL(f); imageResult.value = null }
-
-async function analyzeCurrentImage() {
-  if (!imageFile.value) return
-  imageLoading.value = true
-  try { imageResult.value = await analyzeImage(imageFile.value) }
-  catch (e) { alert('Lỗi phân tích: ' + e.message) }
-  finally { imageLoading.value = false }
-}
-
-function handleVideoUploaded(result) { currentJob.value = result; jobStatus.value = null; latestFrame.value = null }
-function handleError(err) { console.error('Upload error:', err) }
-
-async function startVideoAnalysis() {
-  if (!currentJob.value) return
-  isStarting.value = true
-  try { await startAnalysis(currentJob.value.job_id); connectWS(); startPolling() }
-  catch (e) { console.error(e) }
-  finally { isStarting.value = false }
-}
-
 function connectWS() {
+  if (ws && ws.readyState <= 1) return
   try {
     ws = createWebSocket('upload')
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data)
-      if (msg.type === 'upload_progress' && msg.data?.frame_result?.frame_base64)
-        latestFrame.value = msg.data.frame_result.frame_base64
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'upload_progress' && msg.data?.job_id) {
+          const job = videoJobs.value.find(j => j.job_id === msg.data.job_id)
+          if (job && msg.data.frame_result?.frame_base64) {
+            job.latestFrame = msg.data.frame_result.frame_base64
+          }
+        }
+      } catch {}
+    }
+    ws.onclose = () => { setTimeout(connectWS, 3000) }
+  } catch {}
+}
+
+// File handling
+const MAX_SIZE = 500 * 1024 * 1024
+const MAX_DURATION = 600
+
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files || [])
+  files.forEach(f => addFile(f))
+  if (e.target) e.target.value = ''
+}
+function handleDrop(e) {
+  dragOver.value = false
+  const files = Array.from(e.dataTransfer?.files || [])
+  files.forEach(f => { if (f.type.startsWith('video/') || /\.(mp4|avi|mov|mkv)$/i.test(f.name)) addFile(f) })
+}
+
+function addFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase()
+  if (!['mp4', 'avi', 'mov', 'mkv', 'wmv'].includes(ext)) return
+  if (file.size > MAX_SIZE) return
+
+  const id = Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+  const job = reactive({
+    id,
+    file,
+    filename: file.name,
+    file_size: file.size,
+    duration_sec: null,
+    state: 'pending', // pending -> uploading -> uploaded -> processing -> completed|error
+    job_id: null,
+    uploadProgress: 0,
+    progress: 0,
+    total_frames: 0,
+    processed_frames: 0,
+    vehicles_detected: 0,
+    violations_detected: 0,
+    plates_detected: 0,
+    counts_by_class: {},
+    counts_by_category: {},
+    counts_by_violation: {},
+    error_message: null,
+    frame_skip: 1,
+    latestFrame: null,
+    starting: false,
+    paused: false,
+    seekValue: null,
+    expanded: false,
+    violations: [],
+    detections: [],
+  })
+
+  // Get duration
+  const video = document.createElement('video')
+  video.preload = 'metadata'
+  video.onloadedmetadata = () => {
+    job.duration_sec = video.duration
+    URL.revokeObjectURL(video.src)
+    if (video.duration > MAX_DURATION) {
+      job.state = 'error'
+      job.error_message = `Video quá dài: ${formatDuration(video.duration)}. Tối đa 10 phút.`
+    }
+  }
+  video.src = URL.createObjectURL(file)
+
+  videoJobs.value.push(job)
+
+  // Auto-upload
+  uploadJob(job)
+}
+
+async function uploadJob(job) {
+  if (job.state === 'error') return
+  job.state = 'uploading'
+  job.uploadProgress = 0
+  try {
+    const result = await uploadVideo(job.file, (pct) => { job.uploadProgress = pct })
+    job.job_id = result.job_id
+    job.filename = result.filename
+    job.file_size = result.file_size
+    job.duration_sec = result.duration_sec || job.duration_sec
+    job.total_frames = result.total_frames || 0
+    job.state = 'uploaded'
+  } catch (err) {
+    job.state = 'error'
+    job.error_message = err.message || 'Upload thất bại'
+  }
+}
+
+async function startJobAnalysis(job) {
+  if (!job.job_id || job.starting) return
+  job.starting = true
+  job.frame_skip = currentSpeed.value
+  try {
+    await startAnalysis(job.job_id, currentSpeed.value)
+    job.state = 'processing'
+    connectWS()
+    startPollForJob(job)
+  } catch (err) {
+    if (err.message && err.message.includes('429')) {
+      job.error_message = 'Đang phân tích 2 video. Vui lòng chờ video khác hoàn tất.'
+      job.state = 'error'
+    } else {
+      job.error_message = err.message || 'Không thể bắt đầu phân tích'
+      job.state = 'error'
+    }
+  } finally {
+    job.starting = false
+  }
+}
+
+async function togglePause(job) {
+  if (!job.job_id) return
+  try {
+    if (job.paused) {
+      await resumeAnalysis(job.job_id)
+      job.paused = false
+      job.state = 'processing'
+    } else {
+      await pauseAnalysis(job.job_id)
+      job.paused = true
+      job.state = 'paused'
+    }
+  } catch (err) {
+    console.error('Pause/resume error:', err)
+  }
+}
+
+async function seekToFrame(job, frame) {
+  if (!job.job_id) return
+  try {
+    await seekAnalysis(job.job_id, frame)
+    job.seekValue = frame
+  } catch (err) {
+    console.error('Seek error:', err)
+  }
+}
+
+function startPollForJob(job) {
+  if (pollTimers[job.id]) clearInterval(pollTimers[job.id])
+  pollStatus(job)
+  pollTimers[job.id] = setInterval(() => pollStatus(job), 2000)
+}
+
+async function pollStatus(job) {
+  if (!job.job_id) return
+  try {
+    const s = await getAnalysisStatus(job.job_id)
+    job.progress = s.progress || 0
+    job.total_frames = s.total_frames || job.total_frames
+    job.processed_frames = s.processed_frames || 0
+    job.vehicles_detected = s.vehicles_detected || 0
+    job.violations_detected = s.violations_detected || 0
+    job.plates_detected = s.plates_detected || 0
+    job.counts_by_class = s.counts_by_class || {}
+    job.counts_by_category = s.counts_by_category || {}
+    job.counts_by_violation = s.counts_by_violation || {}
+    job.error_message = s.error_message
+    job.frame_skip = s.frame_skip || job.frame_skip
+
+    if (s.status === 'completed') {
+      job.state = 'completed'
+      job.paused = false
+      stopPollForJob(job)
+      await loadJobResults(job)
+    } else if (s.status === 'error') {
+      job.state = 'error'
+      job.paused = false
+      stopPollForJob(job)
+    } else if (s.status === 'paused') {
+      job.state = 'paused'
+      job.paused = true
+    } else if (s.status === 'processing') {
+      job.state = 'processing'
+      job.paused = false
     }
   } catch {}
 }
 
-async function loadVideoResults() {
-  if (!currentJob.value) return
+function stopPollForJob(job) {
+  if (pollTimers[job.id]) {
+    clearInterval(pollTimers[job.id])
+    delete pollTimers[job.id]
+  }
+}
+
+async function loadJobResults(job) {
   try {
-    const filename = currentJob.value.filename
+    const filename = job.filename
     const violRes = await getViolations({ source_file: filename, limit: 100 })
-    videoViolations.value = violRes.violations || []
+    job.violations = violRes.violations || []
     const detRes = await getDetections({ source_file: filename, limit: 100 })
-    videoDetections.value = detRes.detections || []
-  } catch (e) { console.error('Error loading video results:', e) }
+    job.detections = detRes.detections || []
+  } catch (e) { console.error('Error loading results:', e) }
 }
 
-function showVideoEvidence(item) { evidenceModalItem.value = item }
-
-async function pollStatus() {
-  if (!currentJob.value) return
-  try {
-    const s = await getAnalysisStatus(currentJob.value.job_id)
-    jobStatus.value = s
-    const map = { pending:'Chờ xử lý', processing:'Đang phân tích...', completed:'Hoàn tất', error:'Lỗi' }
-    statusText.value = map[s.status] || s.status
-    if (s.status === 'completed' || s.status === 'error') {
-      stopPolling()
-      if (s.status === 'completed') await loadVideoResults()
-    }
-  } catch {}
+function removeJob(idx) {
+  const job = videoJobs.value[idx]
+  stopPollForJob(job)
+  videoJobs.value.splice(idx, 1)
 }
-function startPolling() { pollStatus(); pollTimer = setInterval(pollStatus, 2000) }
-function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
-function resetAll() {
-  imageFile.value = null; imagePreview.value = null; imageResult.value = null
-  imageLoading.value = false; dragOver.value = false; showImageLightbox.value = false
-  currentJob.value = null; jobStatus.value = null; latestFrame.value = null
-  videoViolations.value = []; videoDetections.value = []; evidenceModalItem.value = null; plateEvidenceModalItem.value = null
-  statusText.value = 'Chờ xử lý'; stopPolling()
-  if (ws) { ws.close(); ws = null }
+function clearAllCompleted() {
+  videoJobs.value = videoJobs.value.filter(j => j.state !== 'completed')
+}
+
+function retryJob(job) {
+  if (job.job_id) {
+    job.state = 'uploaded'
+    job.error_message = null
+    job.progress = 0
+    job.processed_frames = 0
+    job.vehicles_detected = 0
+    job.violations_detected = 0
+    job.plates_detected = 0
+    job.latestFrame = null
+  } else {
+    job.state = 'pending'
+    job.error_message = null
+    uploadJob(job)
+  }
 }
 
 function formatSize(b) { if (!b) return ''; return b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/(1024*1024)).toFixed(1)} MB` }
 function formatDuration(s) { if (!s) return ''; return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}` }
 function formatTime(ts) { if (!ts) return '—'; return new Date(ts).toLocaleString('vi-VN', { hour12: false }) }
 
-function showPlateEvidence(plate) { plateEvidenceModalItem.value = plate }
-
-onUnmounted(() => { stopPolling(); if (ws) ws.close() })
+onUnmounted(() => {
+  Object.values(pollTimers).forEach(t => clearInterval(t))
+  if (ws) ws.close()
+})
 </script>
 
 <style scoped>
-.mode-tabs {
-  display: flex; gap: 4px;
-  background: var(--bg-surface); border-radius: var(--radius-lg);
-  padding: 4px; border: 1px solid var(--border-color);
-  margin-bottom: var(--sp-xl); max-width: 400px;
+/* Upload + Settings Row */
+.upload-settings-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: var(--sp-lg);
+  margin-bottom: var(--sp-xl);
+  align-items: stretch;
 }
-.mode-tab {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 10px 16px; border: none; background: transparent;
-  color: var(--text-secondary); font-size: 0.875rem; font-weight: 600;
-  border-radius: var(--radius-md); cursor: pointer; transition: all var(--transition-fast);
-}
-.mode-tab:hover { color: var(--text-primary); background: rgba(37,99,235,0.06); }
-.mode-tab--active { background: rgba(37,99,235,0.12); color: var(--accent-primary); }
+@media (max-width: 992px) { .upload-settings-row { grid-template-columns: 1fr; } }
 
+/* Drop zone */
 .drop-zone {
   border: 2px dashed var(--border-color); border-radius: var(--radius-lg);
   padding: var(--sp-2xl); text-align: center; cursor: pointer;
   transition: all var(--transition-fast); background: var(--bg-card);
-  min-height: 220px; display: flex; align-items: center; justify-content: center;
+  min-height: 200px; display: flex; align-items: center; justify-content: center;
 }
 .drop-zone:hover { border-color: var(--accent-primary); background: rgba(37,99,235,0.03); }
 .drop-zone--active { border-color: var(--accent-primary); background: rgba(37,99,235,0.06); border-style: solid; }
 .drop-content { display: flex; flex-direction: column; align-items: center; gap: var(--sp-sm); }
 .drop-icon-wrap { color: var(--text-muted); opacity: 0.5; margin-bottom: 8px; }
 .drop-title { font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0; }
-.drop-sub { font-size: 0.82rem; color: var(--text-muted); margin: 0; }
+.drop-sub { font-size: 0.82rem; color: var(--text-muted); margin: 0; max-width: 320px; line-height: 1.5; }
 
-.preview-in-zone { display: flex; align-items: center; gap: var(--sp-lg); width: 100%; }
-.preview-thumb { width: 160px; height: 110px; object-fit: cover; border-radius: var(--radius-md); border: 1px solid var(--border-color); }
-.preview-info { flex: 1; text-align: left; }
-.preview-name { display: block; font-weight: 600; font-size: 0.9rem; color: var(--text-primary); word-break: break-all; }
-.preview-size { display: block; font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
-
-.loading-card { display: flex; flex-direction: column; align-items: center; gap: var(--sp-md); padding: var(--sp-2xl); color: var(--text-muted); }
-
-.result-section { display: flex; flex-direction: column; gap: var(--sp-lg); }
-.result-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-sm); }
-.result-header h2 { margin: 0; font-size: 1.2rem; }
-
-.annotated-wrap { border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border-color); cursor: zoom-in; }
-.annotated-img { width: 100%; display: block; }
-
-.result-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-md); }
-.rs-card {
+/* Speed panel */
+.speed-panel {
   background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg);
-  padding: 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: var(--sp-lg); display: flex; flex-direction: column; gap: 14px;
+}
+.speed-panel h3 { margin: 0; font-size: 0.9rem; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+.speed-slider-wrap { display: flex; flex-direction: column; gap: 6px; }
+.speed-slider {
+  width: 100%; height: 6px; -webkit-appearance: none; appearance: none;
+  background: var(--bg-inset); border-radius: 3px; outline: none;
+  cursor: pointer;
+}
+.speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent-primary); cursor: grab;
+  box-shadow: 0 2px 6px rgba(37,99,235,0.3);
+  transition: transform 0.15s ease;
+}
+.speed-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+.speed-slider::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%; border: none;
+  background: var(--accent-primary); cursor: grab;
+}
+.speed-labels {
+  display: flex; justify-content: space-between; padding: 0 2px;
+}
+.speed-label { font-size: 0.68rem; color: var(--text-muted); font-weight: 600; transition: color 0.2s; }
+.speed-label--active { color: var(--accent-primary); }
+.speed-info { display: flex; align-items: center; gap: 10px; }
+.speed-badge {
+  background: rgba(37,99,235,0.12); color: var(--accent-primary);
+  padding: 4px 12px; border-radius: var(--radius-full);
+  font-weight: 800; font-size: 0.9rem; font-family: var(--font-mono);
+}
+.speed-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
+.speed-note {
+  font-size: 0.72rem; color: var(--text-muted); display: flex; align-items: flex-start; gap: 6px;
+  background: rgba(234,179,8,0.06); padding: 8px 12px; border-radius: var(--radius-md);
+  border: 1px solid rgba(234,179,8,0.12); line-height: 1.4;
+}
+
+/* Video list */
+.video-list-section { margin-top: var(--sp-md); }
+.video-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-md); }
+.video-list-header h2 { margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
+.video-cards { display: flex; flex-direction: column; gap: var(--sp-md); }
+
+/* Video card */
+.video-card {
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  padding: 24px 28px; transition: all var(--transition-fast);
+  border-left: 5px solid var(--border-color);
+}
+.video-card:hover { box-shadow: var(--shadow-md); }
+.video-card--uploading { border-left-color: #60a5fa; }
+.video-card--uploaded { border-left-color: #eab308; }
+.video-card--processing { border-left-color: #60a5fa; animation: pulse-border 2s ease-in-out infinite; }
+.video-card--paused { border-left-color: #eab308; }
+.video-card--completed { border-left-color: #34d399; }
+.video-card--error { border-left-color: #f87171; }
+
+@keyframes pulse-border { 0%, 100% { border-left-color: #60a5fa; } 50% { border-left-color: #3b82f6; } }
+
+/* Card header */
+.vc-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-md); }
+.vc-info { flex: 1; }
+.vc-title-row { display: flex; align-items: center; gap: 8px; }
+.vc-idx {
+  width: 30px; height: 30px; border-radius: 50%; background: rgba(37,99,235,0.12); color: #60a5fa;
+  display: flex; align-items: center; justify-content: center; font-size: 0.82rem; font-weight: 700; flex-shrink: 0;
+}
+.vc-name { font-weight: 600; font-size: 1.05rem; color: var(--text-primary); word-break: break-all; }
+.vc-meta { font-size: 0.85rem; color: var(--text-muted); margin-top: 6px; margin-left: 38px; }
+.vc-status-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.vc-status-badge {
+  padding: 4px 12px; border-radius: var(--radius-full); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; white-space: nowrap;
+}
+.status--pending    { background: rgba(148,163,184,0.12); color: #94a3b8; }
+.status--uploading  { background: rgba(37,99,235,0.12);   color: #60a5fa; }
+.status--uploaded   { background: rgba(234,179,8,0.12);   color: #eab308; }
+.status--processing { background: rgba(37,99,235,0.12);   color: #60a5fa; }
+.status--paused     { background: rgba(234,179,8,0.12);   color: #eab308; }
+.status--completed  { background: rgba(16,185,129,0.12);  color: #34d399; }
+.status--error      { background: rgba(239,68,68,0.12);   color: #f87171; }
+.btn--icon-danger {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: none; background: rgba(239,68,68,0.1); color: #f87171; border-radius: 50%; cursor: pointer;
+  transition: all 0.2s;
+}
+.btn--icon-danger:hover { background: rgba(239,68,68,0.2); }
+
+/* Progress + Controls */
+.vc-progress-section { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.vc-progress-text { font-size: 0.78rem; color: var(--text-muted); text-align: center; display: block; margin-top: 6px; }
+.progress-bar__fill--upload { background: linear-gradient(90deg, #60a5fa, #3b82f6); }
+.vc-progress-details { display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; color: var(--text-muted); }
+.vc-live-stats { display: flex; align-items: center; gap: 8px; }
+
+/* Controls row (pause btn + progress bar + pct) */
+.vc-controls-row {
+  display: flex; align-items: center; gap: 12px;
+}
+.btn--icon-control {
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-color); background: var(--bg-inset); color: var(--text-primary);
+  border-radius: 50%; cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+}
+.btn--icon-control:hover { background: rgba(37,99,235,0.1); border-color: var(--accent-primary); color: var(--accent-primary); }
+.vc-pct { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); font-family: var(--font-mono); min-width: 40px; text-align: right; }
+.vc-paused-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(234,179,8,0.12); color: #eab308; padding: 2px 10px; border-radius: var(--radius-full);
+  font-size: 0.72rem; font-weight: 600;
+}
+
+/* Frame seek slider */
+.vc-seek-section {
+  background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;
+}
+.vc-seek-label {
+  font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 6px;
+}
+.vc-seek-row { display: flex; align-items: center; gap: 12px; }
+.vc-seek-slider {
+  flex: 1; height: 5px; -webkit-appearance: none; appearance: none;
+  background: var(--border-color); border-radius: 3px; outline: none; cursor: pointer;
+}
+.vc-seek-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent-primary); cursor: grab;
+  box-shadow: 0 1px 4px rgba(37,99,235,0.3);
+}
+.vc-seek-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%; border: none;
+  background: var(--accent-primary); cursor: grab;
+}
+.vc-seek-val {
+  font-size: 0.82rem; font-weight: 700; color: var(--accent-primary); font-family: var(--font-mono);
+  min-width: 48px; text-align: right;
+}
+
+/* Preview */
+.vc-preview { margin-top: 16px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border-color); max-height: 420px; }
+.vc-preview-img { width: 100%; display: block; object-fit: contain; max-height: 420px; }
+
+/* Actions */
+.vc-actions { margin-top: 12px; }
+
+/* Results */
+.vc-results { margin-top: 18px; display: flex; flex-direction: column; gap: 16px; }
+.vc-stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.rs-card {
+  background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  padding: 18px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;
   transition: transform var(--transition-fast);
 }
 .rs-card:hover { transform: translateY(-2px); }
 .rs-card--blue   { border-top: 3px solid var(--accent-primary); }
 .rs-card--red    { border-top: 3px solid var(--accent-danger); }
 .rs-card--yellow { border-top: 3px solid var(--accent-warning); }
-.rs-val  { font-size: 1.75rem; font-weight: 800; color: var(--text-primary); }
-.rs-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.rs-val  { font-size: 1.8rem; font-weight: 800; color: var(--text-primary); }
+.rs-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.vc-badges-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.vc-expand-btn { align-self: center; }
+.vc-detail-section { display: flex; flex-direction: column; gap: 14px; }
 
-.category-row { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
-.cat-chip { display: flex; align-items: center; gap: var(--sp-sm); padding: 8px 16px; border-radius: var(--radius-full); font-size: 0.85rem; font-weight: 600; }
-.cat-chip--oto    { background: rgba(34,197,94,0.1);  color: #22c55e; }
-.cat-chip--xe_may { background: rgba(239,68,68,0.1);  color: #ef4444; }
-.cat-count { font-weight: 800; }
+/* Error */
+.vc-error {
+  margin-top: 12px; padding: 10px 16px; display: flex; align-items: center; gap: 8px;
+  background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15); border-radius: var(--radius-md);
+  color: #f87171; font-size: 0.85rem;
+}
+.vc-error span { flex: 1; }
 
-.detections-list { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: var(--sp-lg); }
+/* Empty state */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-md);
+  padding: var(--sp-2xl); color: var(--text-muted); opacity: 0.6;
+}
+.empty-state p { margin: 0; font-size: 0.9rem; }
+
+/* Reused detection list styles */
+.detections-list { background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: var(--sp-lg); }
 .detections-list h3 { margin: 0 0 var(--sp-md); font-size: 0.9rem; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
 .det-grid { display: flex; flex-direction: column; gap: 6px; }
 .det-item {
   display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm);
-  padding: 8px 12px; border-radius: var(--radius-md); background: var(--bg-inset); border: 1px solid var(--border-color); font-size: 0.85rem;
+  padding: 8px 12px; border-radius: var(--radius-md); background: var(--bg-card); border: 1px solid var(--border-color); font-size: 0.85rem;
 }
 .det-item__left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .det-item--oto    { border-left: 3px solid #22c55e; }
 .det-item--xe_may { border-left: 3px solid #ef4444; }
 .det-item--violation { border-left: 3px solid #ef4444; }
-.det-item--plate { border-left: 3px solid #f59e0b; }
 .violations-list { border-left: 3px solid #ef4444; }
-.plates-list { border-left: 3px solid #f59e0b; }
-
 .det-idx { width: 24px; height: 24px; background: rgba(37,99,235,0.12); color: #60a5fa; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
 .det-idx--danger { background: rgba(239,68,68,0.12); color: #f87171; }
-.det-idx--plate  { background: rgba(245,158,11,0.12); color: #fbbf24; }
-.det-cat { font-size: 0.72rem; color: var(--text-muted); margin-left: auto; }
-
-.plate-thumb-img { height: 32px; border-radius: 4px; margin-left: auto; border: 1px solid var(--border-color); }
-
-.results-split-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; align-items: start; margin-top: 16px; }
-.results-visuals-col, .results-lists-col { display: flex; flex-direction: column; gap: 16px; }
-@media (max-width: 992px) { .results-split-layout { grid-template-columns: 1fr; } }
-
-.job-card { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; }
-.job-card__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.job-info h3 { margin: 0 0 4px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
-.job-meta { font-size: 0.8rem; color: var(--text-muted); }
-.job-status { padding: 4px 12px; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-.status--pending    { background: rgba(234,179,8,0.12);  color: #eab308; }
-.status--processing { background: rgba(37,99,235,0.12);  color: #60a5fa; }
-.status--completed  { background: rgba(16,185,129,0.12); color: #34d399; }
-.status--error      { background: rgba(239,68,68,0.12);  color: #f87171; }
-.job-progress { margin-bottom: 16px; }
-.progress-text { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted); margin-top: 8px; }
-.progress-counts { display: flex; align-items: center; gap: 8px; }
-
-.preview-section { margin-bottom: 20px; }
-.preview-section h3 { font-size: 1rem; margin: 0 0 12px; }
 
 .evidence-details { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
 .evidence-details p { margin: 0; font-size: 0.9rem; color: var(--text-secondary); }
 .evidence-details strong { color: var(--text-primary); }
-
-.lightbox-content { position: relative; max-width: 95vw; max-height: 95vh; }
-.lightbox-content img { max-width: 100%; max-height: 90vh; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); display: block; }
-.lightbox-content .modal-close { position: absolute; top: -12px; right: -12px; }
 </style>
