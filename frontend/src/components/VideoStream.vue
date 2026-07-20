@@ -155,6 +155,26 @@ const testResult = ref(null)
 
 let ws = null
 
+// Coalesce nhiều message WS đến giữa 2 lần vẽ lại màn hình thành 1 lần cập nhật DOM
+// (requestAnimationFrame) — tránh set currentFrame/frameData liên tục ngoài nhịp render
+// của trình duyệt, nguyên nhân giật lag khi stream gửi frame với tần suất cao.
+let pendingFrameMsg = null
+let rafScheduled = false
+function flushPendingFrame() {
+  rafScheduled = false
+  if (!pendingFrameMsg) return
+  frameData.value = pendingFrameMsg
+  currentFrame.value = pendingFrameMsg.frame_base64 || null
+  pendingFrameMsg = null
+}
+function queueFrameMsg(data) {
+  pendingFrameMsg = data
+  if (!rafScheduled) {
+    rafScheduled = true
+    requestAnimationFrame(flushPendingFrame)
+  }
+}
+
 // ── Computed ───────────────────────────────────────────────────
 const statusDotClass = computed(() => ({
   'status-dot--live':        isStreaming.value && !reconnecting.value,
@@ -237,8 +257,7 @@ async function startCurrentStream() {
       const msg = JSON.parse(event.data)
 
       if (msg.type === 'frame_result') {
-        frameData.value  = msg.data
-        currentFrame.value = msg.data.frame_base64 || null
+        queueFrameMsg(msg.data)
         reconnecting.value = false
         emit('frame-result', msg.data)
       } else if (msg.type === 'stream_ended') {
@@ -271,6 +290,7 @@ async function stopCurrentStream() {
     await removeCamera(props.cameraId)
   } catch {}
   if (ws) { ws.close(); ws = null }
+  pendingFrameMsg = null
   isStreaming.value  = false
   reconnecting.value = false
   currentFrame.value = null

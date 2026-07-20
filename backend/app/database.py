@@ -208,6 +208,20 @@ async def create_violation(data: ViolationCreate) -> Optional[str]:
     return str(result.inserted_id)
 
 
+async def update_violation_plate(violation_id: str, plate_text: str, vehicle_class: Optional[str] = None) -> bool:
+    if _db is None:
+        return False
+    update_data = {"plate_text": plate_text}
+    if vehicle_class:
+        update_data["vehicle_class"] = vehicle_class
+    result = await _db["violations"].update_one(
+        {"_id": ObjectId(violation_id)},
+        {"$set": update_data}
+    )
+    return result.modified_count > 0
+
+
+
 async def get_violations(
     skip: int = 0,
     limit: int = 50,

@@ -63,6 +63,8 @@ from .config import (
     ENABLE_ROI, ROI_X1, ROI_Y1, ROI_X2, ROI_Y2,
     ENABLE_FRAME_UPSCALE, UPSCALE_MIN_WIDTH, UPSCALE_TARGET_WIDTH,
     ENABLE_FRAME_ENHANCE, YOLO_INFER_SIZE, SAVE_ANNOTATED_EVIDENCE,
+    ENABLE_OBJECT_TRACKING,
+    WS_BROADCAST_MIN_INTERVAL_MS, WS_PREVIEW_MAX_WIDTH, WS_PREVIEW_JPEG_QUALITY,
 )
 from .database import (
     connect_to_mongo,
@@ -73,6 +75,7 @@ from .database import (
     delete_detection,
     get_stats,
     create_violation,
+    update_violation_plate,
     get_violations,
     count_violations,
     delete_violation,
@@ -115,6 +118,7 @@ from .utils.image_utils import (
     enhance_frame,
 )
 from .utils.evidence_storage import save_evidence, get_evidence_path, save_plate_evidence
+from .utils.tracker import create_tracker, is_tracking_available
 
 logging.basicConfig(
     level=logging.INFO,
@@ -144,6 +148,14 @@ _analysis_seek_targets: Dict[str, Optional[int]] = {}
 async def lifespan(app: FastAPI):
     logger.info("Khởi động Traffic Violation Detection API v4.0...")
     await connect_to_mongo()
+
+    # Giới hạn số lượng thread của PyTorch để tối ưu CPU khi xử lý song song video
+    try:
+        import torch
+        torch.set_num_threads(2)
+        logger.info("✅ Giới hạn số thread PyTorch = 2")
+    except Exception as e:
+        logger.warning(f"Không thể thiết lập số thread PyTorch: {e}")
 
     # Ensure directories
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
@@ -196,6 +208,7 @@ def _process_frame(
     frame: np.ndarray,
     frame_id: int = 0,
     camera_id: str = "CAM_01",
+    tracker=None,
 ) -> dict:
     """
     Xử lý 1 frame qua pipeline AI:
@@ -206,6 +219,11 @@ def _process_frame(
     ⑤ Draw bounding boxes
     ⑥ Overlay info
     ⑦ Encode base64
+
+    Args:
+        tracker: instance ByteTrack (từ utils.tracker.create_tracker()) của RIÊNG
+            video/camera đang xử lý — nếu None, vehicle detection chạy không tracking
+            (không có track_id, dùng cho single-shot endpoint /api/analyze/frame).
 
     Returns: dict kết quả + annotated frame (base64 và numpy).
     """
@@ -267,9 +285,10 @@ def _process_frame(
     infer_size = YOLO_INFER_SIZE if YOLO_INFER_SIZE > 0 else None
 
     # ① Vehicle Detection (dùng detect_frame đã upscale + YOLO_INFER_SIZE)
+    # tracker=None → detect_tracked() tự fallback về detect() thường (không track_id)
     vehicles = []
     if ENABLE_VEHICLE_DETECTION and vehicle_detector.is_loaded:
-        vehicles = vehicle_detector.detect(detect_frame, imgsz=infer_size)
+        vehicles = vehicle_detector.detect_tracked(detect_frame, tracker, imgsz=infer_size)
 
     violations = []
     if ENABLE_VIOLATION_DETECTION and violation_detector.is_loaded:
@@ -361,6 +380,7 @@ def _process_frame(
                 matching_vehicle = active_vehicles[best_idx]
                 viol.vehicle_class = matching_vehicle.class_name
                 viol.plate_text = vehicle_to_plate.get(best_idx)
+                viol.vehicle_track_id = matching_vehicle.track_id
 
         # Hậu xử lý dự phòng
         if not viol.vehicle_class:
@@ -425,8 +445,13 @@ def _process_frame(
         camera_id=camera_id,
     )
 
-    # ⑦ Encode annotated frame
-    frame_b64 = numpy_to_base64(annotated, quality=85)
+    # ⑦ Encode annotated frame — ảnh preview gửi qua WebSocket được thu nhỏ riêng
+    # (giảm payload/độ trễ hiển thị), KHÔNG ảnh hưởng "annotated_frame" full-res dùng lưu evidence.
+    preview = annotated
+    h_ann, w_ann = annotated.shape[:2]
+    if w_ann > WS_PREVIEW_MAX_WIDTH:
+        preview = resize_keep_aspect(annotated, WS_PREVIEW_MAX_WIDTH, int(h_ann * WS_PREVIEW_MAX_WIDTH / w_ann))
+    frame_b64 = numpy_to_base64(preview, quality=WS_PREVIEW_JPEG_QUALITY)
 
     return {
         "frame_id": frame_id,
@@ -677,7 +702,11 @@ async def analyze_frame(payload: dict):
         raise HTTPException(400, "Missing frame_base64")
     frame = base64_to_numpy(b64)
     frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
-    result = _process_frame(frame, camera_id=payload.get("camera_id", "API"))
+    camera_id = payload.get("camera_id", "API")
+    result = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda f=frame, cid=camera_id: _process_frame(f, camera_id=cid),
+    )
     result.pop("annotated_frame", None)
     return result
 
@@ -847,10 +876,31 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
         cumulative_by_category: dict = {}
         cumulative_by_violation: dict = {}
 
-        # Lịch sử theo dõi phục vụ khử trùng lặp (lưu giữ tối đa 15 frame processed ~ 5 giây)
+        # ── Object tracking (ByteTrack) — định danh ổn định xuyên frame ──
+        # 1 tracker RIÊNG cho job này (không chia sẻ giữa các video chạy song song).
+        tracker = create_tracker() if ENABLE_OBJECT_TRACKING else None
+        use_tracking = tracker is not None
+        if ENABLE_OBJECT_TRACKING and not use_tracking:
+            logger.warning(
+                f"Job {job_id}: ByteTrack không khả dụng ({'thiếu dependency' if not is_tracking_available() else 'lỗi khởi tạo'})"
+                " — fallback về dedup buffer IOU cũ."
+            )
+
+        # track_id -> db_id (vehicles đã lưu, chỉ dùng khi use_tracking=True)
+        saved_vehicle_tracks: dict = {}
+        # (track_id, violation_type) -> {"db_id", "plate_text"} (chỉ dùng khi use_tracking=True)
+        saved_violation_tracks: dict = {}
+
+        # Lịch sử theo dõi phục vụ khử trùng lặp kiểu cũ (buffer trượt 15 frame ~ 5 giây).
+        # Vẫn cần giữ khi use_tracking=True: dùng làm fallback cho phần nhỏ vi phạm KHÔNG
+        # khớp không gian được với xe nào có track_id (vehicle_track_id=None), và cho toàn
+        # bộ vehicles/violations khi ENABLE_OBJECT_TRACKING=False (rollback).
         recent_detections = []
         recent_violations = []
         unique_plates = set()
+
+        # Throttle tần suất broadcast WebSocket (tách khỏi tần suất xử lý AI/lưu DB)
+        last_broadcast_ts = 0.0
 
         def calculate_overlap_score(box1, box2):
             x1_1, y1_1, x2_1, y2_1 = box1
@@ -889,7 +939,8 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
                 processed = seek_target
                 logger.info(f"Seek job {job_id}: jumped to frame {seek_target} (raw {target_raw_frame})")
 
-            ret, frame = cap.read()
+            # Non-blocking read
+            ret, frame = await asyncio.to_thread(cap.read)
             if not ret:
                 break
 
@@ -901,10 +952,11 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
             frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
 
             # Run inference in thread executor to not block event loop
+            t_infer_start = time.time()
             try:
                 result = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda f=frame, p=processed: _process_frame(f, frame_id=p, camera_id="UPLOAD"),
+                    lambda f=frame, p=processed: _process_frame(f, frame_id=p, camera_id="UPLOAD", tracker=tracker),
                 )
             except Exception as e:
                 logger.warning(f"Frame {processed} inference error: {e}")
@@ -919,77 +971,130 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
             # Lấy annotated frame (có bounding box) để lưu evidence
             evidence_source = result.get("annotated_frame") if SAVE_ANNOTATED_EVIDENCE else frame
 
-            # Dọn dẹp dữ liệu theo dõi quá cũ (> 15 processed frames)
+            # Dọn dẹp dữ liệu theo dõi quá cũ (> 15 processed frames) — chỉ thật sự cần khi
+            # use_tracking=False (fallback toàn phần) hoặc cho phần violation track-less
             recent_detections = [d for d in recent_detections if processed - d["frame_idx"] <= 15]
             recent_violations = [v for v in recent_violations if processed - v["frame_idx"] <= 15]
 
-            # Lưu phát hiện phương tiện (khử trùng lặp qua IOU + bao chứa)
+            # ── Lưu phát hiện phương tiện ──
             for v in result.get("vehicles", []):
                 v_box = (v["bbox"]["x1"], v["bbox"]["y1"], v["bbox"]["x2"], v["bbox"]["y2"])
-                is_duplicate = False
-                for prev in recent_detections:
-                    if prev["class_name"] == v["class_name"]:
-                        if calculate_overlap_score(v_box, prev["bbox"]) > 0.45:
-                            is_duplicate = True
-                            break
-                if not is_duplicate:
-                    evidence_path = save_evidence(
-                        evidence_source, f"{job_id}_{processed}_{v['class_name']}"
-                    )
-                    await create_detection(DetectionCreate(
-                        vehicle_class=v["class_name"],
-                        category=v["category"],
-                        confidence=v["bbox"]["conf"],
-                        camera_id="UPLOAD",
-                        source_type="upload",
-                        source_file=Path(video_path).name,
-                        evidence_path=evidence_path,
-                    ))
+                track_id = v.get("track_id") if use_tracking else None
+
+                if use_tracking and track_id is not None:
+                    # Định danh bằng track_id ổn định (ByteTrack) — mỗi track chỉ lưu 1 lần,
+                    # không phụ thuộc buffer thời gian nên xe bị che khuất lâu vẫn giữ đúng identity.
+                    if track_id in saved_vehicle_tracks:
+                        continue
+                else:
+                    # Fallback: dedup kiểu cũ qua IOU/containment trong buffer 15 frame
+                    matched_prev = None
+                    best_score = 0.0
+                    for prev in recent_detections:
+                        if prev["class_name"] == v["class_name"]:
+                            score = calculate_overlap_score(v_box, prev["bbox"])
+                            if score > 0.45 and score > best_score:
+                                best_score = score
+                                matched_prev = prev
+                    if matched_prev:
+                        matched_prev["bbox"] = v_box
+                        matched_prev["frame_idx"] = processed
+                        continue
+
+                evidence_path = await asyncio.to_thread(
+                    save_evidence, evidence_source, f"{job_id}_{processed}_{v['class_name']}"
+                )
+                db_id = await create_detection(DetectionCreate(
+                    vehicle_class=v["class_name"],
+                    category=v["category"],
+                    confidence=v["bbox"]["conf"],
+                    camera_id="UPLOAD",
+                    source_type="upload",
+                    source_file=Path(video_path).name,
+                    evidence_path=evidence_path,
+                    track_id=track_id,
+                ))
+                if use_tracking and track_id is not None:
+                    saved_vehicle_tracks[track_id] = db_id
+                else:
                     recent_detections.append({
                         "bbox": v_box,
                         "class_name": v["class_name"],
-                        "frame_idx": processed
+                        "frame_idx": processed,
+                        "db_id": db_id
                     })
-                    vehicles_total += 1
-                    cumulative_by_class[v["class_name"]] = cumulative_by_class.get(v["class_name"], 0) + 1
-                    cumulative_by_category[v["category"]] = cumulative_by_category.get(v["category"], 0) + 1
+                vehicles_total += 1
+                cumulative_by_class[v["class_name"]] = cumulative_by_class.get(v["class_name"], 0) + 1
+                cumulative_by_category[v["category"]] = cumulative_by_category.get(v["category"], 0) + 1
 
-            # Lưu các vi phạm phát hiện được (khử trùng lặp qua IOU + bao chứa và biển số)
+            # ── Lưu các vi phạm phát hiện được ──
             for viol in result.get("violations", []):
                 viol_box = (viol["bbox"]["x1"], viol["bbox"]["y1"], viol["bbox"]["x2"], viol["bbox"]["y2"])
-                p_text = viol.get("plate_text") or ""
-                is_duplicate = False
-                for prev in recent_violations:
-                    if prev["violation_type"] == viol["violation_type"]:
-                        if p_text and prev["plate_text"] and p_text == prev["plate_text"]:
-                            is_duplicate = True
-                            break
-                        if calculate_overlap_score(viol_box, prev["bbox"]) > 0.45:
-                            is_duplicate = True
-                            break
-                if not is_duplicate:
-                    evidence_path = save_evidence(
-                        evidence_source, f"{job_id}_{processed}_viol_{viol['violation_type']}"
-                    )
-                    await create_violation(ViolationCreate(
-                        violation_type=viol["violation_type"],
-                        violation_label=viol["violation_label"],
-                        confidence=viol["bbox"]["conf"],
-                        plate_text=viol.get("plate_text") or None,
-                        vehicle_class=viol.get("vehicle_class") or None,
-                        camera_id="UPLOAD",
-                        source_type="upload",
-                        source_file=Path(video_path).name,
-                        evidence_path=evidence_path,
-                    ))
+                p_text = (viol.get("plate_text") or "").strip().upper()
+                v_track_id = viol.get("vehicle_track_id") if use_tracking else None
+                track_key = (v_track_id, viol["violation_type"]) if v_track_id is not None else None
+
+                if track_key is not None:
+                    # Định danh bằng (vehicle_track_id, violation_type) — 1 lần / xe / loại vi phạm
+                    existing = saved_violation_tracks.get(track_key)
+                    if existing:
+                        # Bổ sung biển số muộn nếu trước đó chưa nhận diện được
+                        if not existing["plate_text"] and p_text:
+                            existing["plate_text"] = p_text
+                            await update_violation_plate(existing["db_id"], p_text, viol.get("vehicle_class"))
+                        continue
+                else:
+                    # Vi phạm KHÔNG khớp không gian được với xe có track_id nào (hiếm) —
+                    # fallback dedup kiểu cũ qua IOU/containment + so khớp biển số trong buffer
+                    matched_prev = None
+                    best_score = 0.0
+                    for prev in recent_violations:
+                        if prev["violation_type"] == viol["violation_type"]:
+                            if p_text and prev["plate_text"] and p_text == prev["plate_text"]:
+                                matched_prev = prev
+                                break
+                            score = calculate_overlap_score(viol_box, prev["bbox"])
+                            if score > 0.45 and score > best_score:
+                                best_score = score
+                                matched_prev = prev
+                    if matched_prev:
+                        matched_prev["bbox"] = viol_box
+                        matched_prev["frame_idx"] = processed
+                        if not matched_prev["plate_text"] and p_text:
+                            matched_prev["plate_text"] = p_text
+                            if matched_prev.get("db_id"):
+                                await update_violation_plate(
+                                    matched_prev["db_id"], p_text, viol.get("vehicle_class")
+                                )
+                        continue
+
+                evidence_path = await asyncio.to_thread(
+                    save_evidence, evidence_source, f"{job_id}_{processed}_viol_{viol['violation_type']}"
+                )
+                db_id = await create_violation(ViolationCreate(
+                    violation_type=viol["violation_type"],
+                    violation_label=viol["violation_label"],
+                    confidence=viol["bbox"]["conf"],
+                    plate_text=p_text or None,
+                    vehicle_class=viol.get("vehicle_class") or None,
+                    camera_id="UPLOAD",
+                    source_type="upload",
+                    source_file=Path(video_path).name,
+                    evidence_path=evidence_path,
+                    vehicle_track_id=v_track_id,
+                ))
+                if track_key is not None:
+                    saved_violation_tracks[track_key] = {"db_id": db_id, "plate_text": p_text}
+                else:
                     recent_violations.append({
                         "bbox": viol_box,
                         "violation_type": viol["violation_type"],
                         "plate_text": p_text,
-                        "frame_idx": processed
+                        "frame_idx": processed,
+                        "db_id": db_id
                     })
-                    violations_total += 1
-                    cumulative_by_violation[viol["violation_type"]] = cumulative_by_violation.get(viol["violation_type"], 0) + 1
+                violations_total += 1
+                cumulative_by_violation[viol["violation_type"]] = cumulative_by_violation.get(viol["violation_type"], 0) + 1
 
             # Thống kê lượng biển số xe độc nhất trong video
             for plate in result.get("plates", []):
@@ -1003,10 +1108,12 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
                         plate_ev_path = None
                         if plate.get("plate_image_base64"):
                             plate_crop = base64_to_numpy(plate["plate_image_base64"])
-                            plate_ev_path = save_plate_evidence(plate_crop, f"vid_{job_id}_{processed}_plate_{plate_id}")
+                            plate_ev_path = await asyncio.to_thread(
+                                save_plate_evidence, plate_crop, f"vid_{job_id}_{processed}_plate_{plate_id}"
+                            )
                             
-                        evidence_path = save_evidence(
-                            evidence_source, f"vid_{job_id}_{processed}_full_plate_{plate_id}"
+                        evidence_path = await asyncio.to_thread(
+                            save_evidence, evidence_source, f"vid_{job_id}_{processed}_full_plate_{plate_id}"
                         )
 
                         await create_plate_detection(PlateDetectionCreate(
@@ -1023,25 +1130,30 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
                             plate_evidence_path=plate_ev_path,
                         ))
 
-            # Debug log every 30 frames
+            # Debug log every 30 frames (kèm processing_ms + số track đang active để theo dõi lag/dedup)
             if processed % 30 == 0:
+                processing_ms = (time.time() - t_infer_start) * 1000
+                active_tracks = len(tracker.tracked_stracks) if tracker is not None else -1
                 logger.info(f"  Frame {processed}: {frame_vehicles} vehicles, "
                              f"{frame_violations} violations, {frame_plates} plates. "
-                             f"Total Unique: {vehicles_total} vehicles, {violations_total} violations, {plates_total} plates.")
+                             f"Total Unique: {vehicles_total} vehicles, {violations_total} violations, {plates_total} plates. "
+                             f"processing_ms={processing_ms:.0f} active_tracks={active_tracks}")
 
-            # Xóa annotated_frame numpy trước khi broadcast qua WebSocket
-            ws_result = {k: v for k, v in result.items() if k != "annotated_frame"}
-
-            # Broadcast via WebSocket
-            await manager.broadcast({
-                "type": "upload_progress",
-                "data": {
-                    "job_id": job_id,
-                    "frame_id": processed,
-                    "progress": min(1.0, processed / max(total_process, 1)),
-                    "frame_result": ws_result,
-                },
-            }, room="upload")
+            # Broadcast via WebSocket — throttle theo thời gian (không throttle xử lý AI/lưu DB)
+            now_ts = time.time()
+            if (now_ts - last_broadcast_ts) * 1000 >= WS_BROADCAST_MIN_INTERVAL_MS:
+                last_broadcast_ts = now_ts
+                # Xóa annotated_frame numpy trước khi broadcast qua WebSocket
+                ws_result = {k: v for k, v in result.items() if k != "annotated_frame"}
+                await manager.broadcast({
+                    "type": "upload_progress",
+                    "data": {
+                        "job_id": job_id,
+                        "frame_id": processed,
+                        "progress": min(1.0, processed / max(total_process, 1)),
+                        "frame_result": ws_result,
+                    },
+                }, room="upload")
 
             processed += 1
 
@@ -1060,7 +1172,7 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
                 )
 
             frame_idx += 1
-            await asyncio.sleep(0)  # Yield to event loop
+            await asyncio.sleep(0.01)  # Yield to event loop
 
         cap.release()
 
@@ -1233,6 +1345,21 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                         frame_skip: int = 2, reconnect: bool = True):
     """Background task: read MJPEG stream and process with all AI modules."""
     frame_idx = 0
+
+    # 1 tracker RIÊNG cho camera này (không chia sẻ giữa các stream khác nhau)
+    tracker = create_tracker() if ENABLE_OBJECT_TRACKING else None
+    use_tracking = tracker is not None
+    if ENABLE_OBJECT_TRACKING and not use_tracking:
+        logger.warning(f"Stream {camera_id}: ByteTrack không khả dụng — fallback về dedup mẫu 60-frame cũ")
+    _cameras[camera_id]["tracker"] = tracker
+
+    # track_id -> db_id (vehicles đã lưu) / (track_id, violation_type) -> {"db_id","plate_text"}
+    saved_vehicle_tracks: dict = {}
+    saved_violation_tracks: dict = {}
+
+    # Throttle tần suất broadcast WebSocket (tách khỏi tần suất xử lý AI/lưu DB)
+    last_broadcast_ts = 0.0
+
     try:
         if not reader.connect():
             _cameras[camera_id]["info"]["status"] = "offline"
@@ -1257,7 +1384,25 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                 continue
 
             frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
-            result = _process_frame(frame, frame_id=frame_idx, camera_id=camera_id)
+
+            # Run inference in thread executor to not block event loop
+            # (giữ nguyên tần suất AI xử lý nhưng không chặn WebSocket/HTTP khác)
+            t_infer_start = time.time()
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda f=frame, i=frame_idx, cid=camera_id: _process_frame(f, frame_id=i, camera_id=cid, tracker=tracker),
+                )
+            except Exception as e:
+                logger.warning(f"Stream {camera_id} frame {frame_idx} inference error: {e}")
+                continue
+
+            # Log định kỳ mỗi 30 frame: processing_ms + số track đang active (theo dõi lag/dedup)
+            if frame_idx % 30 == 0:
+                processing_ms = (time.time() - t_infer_start) * 1000
+                active_tracks = len(tracker.tracked_stracks) if tracker is not None else -1
+                logger.info(f"Stream {camera_id} frame {frame_idx}: processing_ms={processing_ms:.0f} "
+                             f"active_tracks={active_tracks}")
 
             # Lấy annotated frame để lưu evidence có bounding box
             evidence_source = result.get("annotated_frame") if SAVE_ANNOTATED_EVIDENCE else frame
@@ -1269,21 +1414,75 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
             _cameras[camera_id]["info"]["frame_count"] = frame_idx
             _cameras[camera_id]["info"]["last_seen"] = datetime.utcnow().isoformat()
 
-            # Broadcast to WebSocket room
-            await manager.broadcast(
-                {"type": "frame_result", "data": result},
-                room=camera_id,
-            )
+            # Broadcast to WebSocket room — throttle theo thời gian (không throttle xử lý AI/lưu DB)
+            now_ts = time.time()
+            if (now_ts - last_broadcast_ts) * 1000 >= WS_BROADCAST_MIN_INTERVAL_MS:
+                last_broadcast_ts = now_ts
+                await manager.broadcast(
+                    {"type": "frame_result", "data": result},
+                    room=camera_id,
+                )
 
-            # Save detection samples to DB (every 60 frames)
-            if frame_idx % 60 == 0:
-                # Save vehicle detections
+            # Save vehicle/violation detections to DB
+            if use_tracking:
+                # Track-id based: lưu ngay khi 1 track MỚI xuất hiện (không cần đợi mẫu 60 frame),
+                # mỗi track/mỗi (track, loại vi phạm) chỉ lưu đúng 1 lần trong suốt phiên stream.
+                if result.get("vehicles"):
+                    for v in result["vehicles"]:
+                        track_id = v.get("track_id")
+                        if track_id is None or track_id in saved_vehicle_tracks:
+                            continue
+                        evidence_path = await asyncio.to_thread(
+                            save_evidence, evidence_source, f"stream_{camera_id}_{frame_idx}_{v['class_name']}"
+                        )
+                        db_id = await create_detection(DetectionCreate(
+                            vehicle_class=v["class_name"],
+                            category=v["category"],
+                            confidence=v["bbox"]["conf"],
+                            camera_id=camera_id,
+                            source_type="stream",
+                            evidence_path=evidence_path,
+                            track_id=track_id,
+                        ))
+                        saved_vehicle_tracks[track_id] = db_id
+
+                if result.get("violations"):
+                    for viol in result["violations"]:
+                        v_track_id = viol.get("vehicle_track_id")
+                        p_text = (viol.get("plate_text") or "").strip().upper()
+                        track_key = (v_track_id, viol["violation_type"]) if v_track_id is not None else None
+                        if track_key is not None:
+                            existing = saved_violation_tracks.get(track_key)
+                            if existing:
+                                if not existing["plate_text"] and p_text:
+                                    existing["plate_text"] = p_text
+                                    await update_violation_plate(existing["db_id"], p_text, viol.get("vehicle_class"))
+                                continue
+                        evidence_path = await asyncio.to_thread(
+                            save_evidence, evidence_source, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
+                        )
+                        db_id = await create_violation(ViolationCreate(
+                            violation_type=viol["violation_type"],
+                            violation_label=viol["violation_label"],
+                            confidence=viol["bbox"]["conf"],
+                            plate_text=p_text or None,
+                            vehicle_class=viol.get("vehicle_class") or None,
+                            camera_id=camera_id,
+                            source_type="stream",
+                            evidence_path=evidence_path,
+                            vehicle_track_id=v_track_id,
+                        ))
+                        if track_key is not None:
+                            saved_violation_tracks[track_key] = {"db_id": db_id, "plate_text": p_text}
+            elif frame_idx % 60 == 0:
+                # Fallback cũ (ENABLE_OBJECT_TRACKING=False hoặc tracker lỗi): lưu mẫu mỗi 60
+                # frame, dedup nội-frame theo class_name (không dedup xuyên frame).
                 if result.get("vehicles"):
                     seen = set()
                     for v in result["vehicles"]:
                         if v["class_name"] not in seen:
-                            evidence_path = save_evidence(
-                                evidence_source, f"stream_{camera_id}_{frame_idx}_{v['class_name']}"
+                            evidence_path = await asyncio.to_thread(
+                                save_evidence, evidence_source, f"stream_{camera_id}_{frame_idx}_{v['class_name']}"
                             )
                             await create_detection(DetectionCreate(
                                 vehicle_class=v["class_name"],
@@ -1295,11 +1494,10 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                             ))
                             seen.add(v["class_name"])
 
-                # Save violations
                 if result.get("violations"):
                     for viol in result["violations"]:
-                        evidence_path = save_evidence(
-                            evidence_source, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
+                        evidence_path = await asyncio.to_thread(
+                            save_evidence, evidence_source, f"stream_{camera_id}_{frame_idx}_viol_{viol['violation_type']}"
                         )
                         await create_violation(ViolationCreate(
                             violation_type=viol["violation_type"],
@@ -1312,7 +1510,8 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                             evidence_path=evidence_path,
                         ))
 
-                # Save plates
+            # Save plates (mẫu mỗi 60 frame — chưa có định danh track riêng cho biển số)
+            if frame_idx % 60 == 0:
                 if result.get("plates"):
                     for plate in result["plates"]:
                         if not plate.get("is_valid_plate"):
@@ -1322,10 +1521,12 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                         plate_ev_path = None
                         if plate.get("plate_image_base64"):
                             plate_crop = base64_to_numpy(plate["plate_image_base64"])
-                            plate_ev_path = save_plate_evidence(plate_crop, f"stream_{camera_id}_{frame_idx}_plate_{plate_id}")
-                            
-                        evidence_path = save_evidence(
-                            evidence_source, f"stream_{camera_id}_{frame_idx}_full_plate_{plate_id}"
+                            plate_ev_path = await asyncio.to_thread(
+                                save_plate_evidence, plate_crop, f"stream_{camera_id}_{frame_idx}_plate_{plate_id}"
+                            )
+
+                        evidence_path = await asyncio.to_thread(
+                            save_evidence, evidence_source, f"stream_{camera_id}_{frame_idx}_full_plate_{plate_id}"
                         )
                         await create_plate_detection(PlateDetectionCreate(
                             plate_text=plate["normalized_text"],

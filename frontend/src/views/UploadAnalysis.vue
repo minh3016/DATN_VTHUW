@@ -131,10 +131,11 @@
             </div>
           </div>
 
-          <!-- Live preview frame -->
-          <div v-if="(job.state === 'processing' || job.state === 'paused') && job.latestFrame" class="vc-preview">
-            <img :src="'data:image/jpeg;base64,' + job.latestFrame" alt="Preview" class="vc-preview-img" />
-          </div>
+          <!-- Live preview frame (component riêng để đổi ảnh không kéo theo re-render cả card) -->
+          <LivePreviewFrame
+            v-if="job.state === 'processing' || job.state === 'paused'"
+            :frame="latestFrames[job.job_id]"
+          />
 
           <!-- Actions: Start analysis -->
           <div v-if="job.state === 'uploaded'" class="vc-actions">
@@ -242,8 +243,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted, reactive } from 'vue'
+import { ref, computed, onUnmounted, reactive, shallowReactive } from 'vue'
 import LucideIcon from '@/components/LucideIcon.vue'
+import LivePreviewFrame from '@/components/LivePreviewFrame.vue'
 import {
   uploadVideo, startAnalysis, getAnalysisStatus,
   pauseAnalysis, resumeAnalysis, seekAnalysis,
@@ -271,11 +273,34 @@ const videoJobs = ref([])
 const dragOver = ref(false)
 const evidenceModalItem = ref(null)
 
+// Ảnh preview realtime theo job_id — tách khỏi object reactive() sâu của job để đổi ảnh
+// mỗi frame không kéo theo re-render/diff toàn bộ card (progress bar, nút bấm...).
+const latestFrames = shallowReactive({})
+
 // Poll timers per job
 const pollTimers = {}
 
 // WebSocket
 let ws = null
+
+// Coalesce nhiều message WS đến giữa 2 lần vẽ lại màn hình thành 1 lần cập nhật DOM
+// (requestAnimationFrame) — tránh set liên tục ngoài nhịp render của trình duyệt.
+const pendingFrames = {}
+let rafScheduled = false
+function flushPendingFrames() {
+  rafScheduled = false
+  for (const jobId in pendingFrames) {
+    latestFrames[jobId] = pendingFrames[jobId]
+  }
+  for (const jobId in pendingFrames) delete pendingFrames[jobId]
+}
+function queueFrameUpdate(jobId, frameBase64) {
+  pendingFrames[jobId] = frameBase64
+  if (!rafScheduled) {
+    rafScheduled = true
+    requestAnimationFrame(flushPendingFrames)
+  }
+}
 
 function connectWS() {
   if (ws && ws.readyState <= 1) return
@@ -284,11 +309,8 @@ function connectWS() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data)
-        if (msg.type === 'upload_progress' && msg.data?.job_id) {
-          const job = videoJobs.value.find(j => j.job_id === msg.data.job_id)
-          if (job && msg.data.frame_result?.frame_base64) {
-            job.latestFrame = msg.data.frame_result.frame_base64
-          }
+        if (msg.type === 'upload_progress' && msg.data?.job_id && msg.data.frame_result?.frame_base64) {
+          queueFrameUpdate(msg.data.job_id, msg.data.frame_result.frame_base64)
         }
       } catch {}
     }
@@ -337,7 +359,6 @@ function addFile(file) {
     counts_by_violation: {},
     error_message: null,
     frame_skip: 1,
-    latestFrame: null,
     starting: false,
     paused: false,
     seekValue: null,
@@ -493,10 +514,17 @@ async function loadJobResults(job) {
 function removeJob(idx) {
   const job = videoJobs.value[idx]
   stopPollForJob(job)
+  if (job.job_id) {
+    delete latestFrames[job.job_id]
+    delete pendingFrames[job.job_id]
+  }
   videoJobs.value.splice(idx, 1)
 }
 
 function clearAllCompleted() {
+  for (const j of videoJobs.value) {
+    if (j.state === 'completed' && j.job_id) delete latestFrames[j.job_id]
+  }
   videoJobs.value = videoJobs.value.filter(j => j.state !== 'completed')
 }
 
@@ -509,7 +537,7 @@ function retryJob(job) {
     job.vehicles_detected = 0
     job.violations_detected = 0
     job.plates_detected = 0
-    job.latestFrame = null
+    if (job.job_id) delete latestFrames[job.job_id]
   } else {
     job.state = 'pending'
     job.error_message = null

@@ -43,6 +43,7 @@ class VehicleDetection(BaseModel):
     class_id: int
     class_name: str       # "car", "truck", "bus", "motorcycle"
     category: str = ""    # "oto" | "xe_may"
+    track_id: Optional[int] = None  # ID theo dõi ổn định xuyên frame (ByteTrack), None nếu tracking tắt/lỗi
 
 
 class ViolationDetection(BaseModel):
@@ -54,6 +55,7 @@ class ViolationDetection(BaseModel):
     is_violation: bool = True  # True = vi phạm, False = hợp lệ
     vehicle_class: Optional[str] = None
     plate_text: Optional[str] = None
+    vehicle_track_id: Optional[int] = None  # track_id của xe được gắn vi phạm này (định danh dedup)
 
 
 class CharDetection(BaseModel):
@@ -112,6 +114,7 @@ class DetectionCreate(BaseModel):
     source_type: str = "stream"  # "stream" | "upload" | "image"
     source_file: Optional[str] = None
     evidence_path: Optional[str] = None
+    track_id: Optional[int] = None  # track_id ByteTrack lúc lưu (audit/debug dedup)
 
 
 class DetectionResponse(DetectionCreate):
@@ -137,6 +140,7 @@ class ViolationCreate(BaseModel):
     source_type: str = "stream"  # "stream" | "upload" | "image"
     source_file: Optional[str] = None
     evidence_path: Optional[str] = None
+    vehicle_track_id: Optional[int] = None  # track_id của xe gắn với vi phạm (audit/debug dedup)
 
 
 class ViolationResponse(ViolationCreate):

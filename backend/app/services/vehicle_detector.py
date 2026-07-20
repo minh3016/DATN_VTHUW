@@ -18,6 +18,7 @@ import numpy as np
 from ..config import VEHICLE_MODEL_PATH, VEHICLE_CONF
 from ..models import BoundingBox, VehicleDetection
 from ..utils.yolo_wrapper import YOLOWrapper
+from ..utils.tracker import update_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,48 @@ class VehicleDetector:
                 )
             )
 
+        return detections
+
+    def detect_tracked(self, frame: np.ndarray, tracker, imgsz: int = None) -> List[VehicleDetection]:
+        """
+        Phát hiện phương tiện VÀ gán track_id ổn định xuyên frame (ByteTrack).
+
+        Args:
+            frame: BGR numpy array
+            tracker: instance tracker (từ utils.tracker.create_tracker()) của
+                RIÊNG video/camera đang xử lý — không dùng chung giữa các luồng.
+            imgsz: Override YOLO inference size
+
+        Returns:
+            List[VehicleDetection] với track_id đã gán (None nếu tracker=None,
+            tương đương detect() thường — dùng làm fallback khi tracking tắt/lỗi).
+        """
+        if not self._loaded:
+            return []
+
+        raw_dets = self._wrapper.detect(frame, imgsz=imgsz)
+        class_names = self._wrapper.class_names
+
+        if tracker is None:
+            return self.detect(frame, imgsz=imgsz)
+
+        tracks = update_tracker(tracker, raw_dets, frame.shape[:2])
+        detections: List[VehicleDetection] = []
+        for t in tracks:
+            class_name = class_names.get(t["cls_id"], f"class_{t['cls_id']}").lower().strip()
+            category = CATEGORY_MAP.get(class_name, "unknown")
+            if category == "unknown":
+                continue
+            x1, y1, x2, y2 = t["bbox"]
+            detections.append(
+                VehicleDetection(
+                    bbox=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, conf=t["conf"]),
+                    class_id=t["cls_id"],
+                    class_name=class_name,
+                    category=category,
+                    track_id=t["track_id"],
+                )
+            )
         return detections
 
     def get_color(self, class_name: str) -> tuple:

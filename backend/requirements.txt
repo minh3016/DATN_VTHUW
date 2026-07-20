@@ -17,6 +17,7 @@ pymongo>=4.7.2
 
 # ── AI / Computer Vision ───────────────────────────────────────
 ultralytics>=8.2.0     # YOLOv8 fallback + utilities
+lap>=0.5.12            # Required by ultralytics.trackers.BYTETracker (Hungarian assignment)
 opencv-python>=4.9.0.80
 numpy>=1.26.0
 Pillow>=10.3.0

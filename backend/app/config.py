@@ -51,6 +51,11 @@ ENABLE_VEHICLE_DETECTION: bool = os.getenv("ENABLE_VEHICLE_DETECTION", "true").l
 ENABLE_VIOLATION_DETECTION: bool = os.getenv("ENABLE_VIOLATION_DETECTION", "true").lower() == "true"
 ENABLE_PLATE_RECOGNITION: bool = os.getenv("ENABLE_PLATE_RECOGNITION", "true").lower() == "true"
 
+# Bật object tracking (ByteTrack) để định danh phương tiện ổn định xuyên frame,
+# thay cho dedup ad-hoc theo IOU/containment. TẮT sẽ rollback về hành vi dedup cũ
+# (buffer trượt N frame) — dùng khi cần so sánh/khắc phục sự cố.
+ENABLE_OBJECT_TRACKING: bool = os.getenv("ENABLE_OBJECT_TRACKING", "true").lower() == "true"
+
 # ── Frame processing ──────────────────────────────────────────
 # Kích thước tối đa cho frame trước khi xử lý (giữ nguyên độ phân giải gốc nếu <= giới hạn)
 FRAME_WIDTH: int = int(os.getenv("FRAME_WIDTH", "1920"))
@@ -86,6 +91,14 @@ CORS_ORIGINS: list = os.getenv(
 
 # ── WebSocket ─────────────────────────────────────────────────
 WS_HEARTBEAT_INTERVAL: int = int(os.getenv("WS_HEARTBEAT_INTERVAL", "30"))
+# Khoảng cách tối thiểu (ms) giữa 2 lần broadcast frame_result/upload_progress cho CÙNG 1 room.
+# Tách tần suất hiển thị (throttled) khỏi tần suất xử lý AI (không đổi) — giảm giật lag frontend
+# và tải mạng khi nhiều video/camera chạy song song. Việc lưu DB không bị ảnh hưởng bởi throttle này.
+WS_BROADCAST_MIN_INTERVAL_MS: int = int(os.getenv("WS_BROADCAST_MIN_INTERVAL_MS", "150"))
+# Độ rộng tối đa (px) của ảnh preview gửi qua WebSocket (annotated frame đầy đủ vẫn được lưu
+# nguyên bản cho evidence trên đĩa — chỉ ảnh gửi qua WS bị thu nhỏ để giảm payload).
+WS_PREVIEW_MAX_WIDTH: int = int(os.getenv("WS_PREVIEW_MAX_WIDTH", "960"))
+WS_PREVIEW_JPEG_QUALITY: int = int(os.getenv("WS_PREVIEW_JPEG_QUALITY", "70"))
 
 # ── Region of Interest (ROI) ──
 # TẮT mặc định – detect toàn bộ frame, không giới hạn vùng
