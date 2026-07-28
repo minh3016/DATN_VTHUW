@@ -163,6 +163,7 @@ class PlateDetectionCreate(BaseModel):
     province_name: str = ""              # Tên tỉnh
     is_valid: bool = True                # Biển số hợp lệ?
     avg_confidence: float = 0.0          # Confidence trung bình OCR
+    confidence: float = 0.0              # Confidence OCR / Detector
     vehicle_class: Optional[str] = None  # Loại xe liên quan
     camera_id: str = "CAM_01"
     source_type: str = "stream"

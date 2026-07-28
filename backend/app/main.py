@@ -33,6 +33,7 @@ Endpoints:
   WS   /ws/{camera_id}                → stream phân tích realtime
 """
 import asyncio
+import io
 import logging
 import os
 import time
@@ -54,7 +55,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .config import (
     CORS_ORIGINS, FRAME_WIDTH, FRAME_HEIGHT, PROCESS_FPS,
@@ -88,6 +89,7 @@ from .database import (
     count_plate_detections,
     delete_plate_detection,
     get_plate_stats,
+    get_export_data,
 )
 from .models import (
     DetectionCreate,
@@ -709,6 +711,344 @@ async def analyze_frame(payload: dict):
     )
     result.pop("annotated_frame", None)
     return result
+
+
+@app.post("/api/analyze/image")
+async def analyze_image(file: UploadFile = File(...)):
+    """Upload and analyze a single image file with AI models."""
+    allowed_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    ext = Path(file.filename).suffix.lower()
+    if ext not in allowed_exts:
+        raise HTTPException(400, f"Định dạng ảnh không hỗ trợ: {ext}. Hỗ trợ: {allowed_exts}")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, "File ảnh rỗng")
+
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "Không thể đọc nội dung file ảnh")
+
+    frame = resize_keep_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
+
+    result = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda f=frame: _process_frame(f, camera_id="IMAGE"),
+    )
+
+    annotated_frame = result.get("annotated_frame")
+    evidence_source = annotated_frame if annotated_frame is not None else frame
+
+    img_id = uuid.uuid4().hex[:8]
+
+    # Save vehicles to DB
+    saved_vehicles = []
+    for v in result.get("vehicles", []):
+        evidence_path = await asyncio.to_thread(
+            save_evidence, evidence_source, f"img_{img_id}_{v['class_name']}"
+        )
+        db_id = await create_detection(DetectionCreate(
+            vehicle_class=v["class_name"],
+            category=v["category"],
+            confidence=v["bbox"]["conf"],
+            camera_id="IMAGE",
+            source_type="image",
+            source_file=file.filename,
+            evidence_path=evidence_path,
+        ))
+        saved_v = dict(v)
+        saved_v["db_id"] = db_id
+        saved_v["evidence_path"] = evidence_path
+        saved_vehicles.append(saved_v)
+
+    # Save violations to DB
+    saved_violations = []
+    for viol in result.get("violations", []):
+        p_text = (viol.get("plate_text") or "").strip().upper()
+        evidence_path = await asyncio.to_thread(
+            save_evidence, evidence_source, f"img_{img_id}_viol_{viol['violation_type']}"
+        )
+        db_id = await create_violation(ViolationCreate(
+            violation_type=viol["violation_type"],
+            violation_label=viol["violation_label"],
+            confidence=viol["bbox"]["conf"],
+            plate_text=p_text or None,
+            vehicle_class=viol.get("vehicle_class") or None,
+            camera_id="IMAGE",
+            source_type="image",
+            source_file=file.filename,
+            evidence_path=evidence_path,
+        ))
+        saved_viol = dict(viol)
+        saved_viol["db_id"] = db_id
+        saved_viol["evidence_path"] = evidence_path
+        saved_violations.append(saved_viol)
+
+    # Save plates to DB
+    saved_plates = []
+    for plate in result.get("plates", []):
+        p_text = (plate.get("plate_text") or "").strip().upper()
+        plate_ev_path = None
+        if plate.get("plate_image_base64"):
+            plate_crop = base64_to_numpy(plate["plate_image_base64"])
+            if plate_crop is not None:
+                plate_ev_path = await asyncio.to_thread(
+                    save_plate_evidence, plate_crop, p_text or "UNKNOWN"
+                )
+
+        if plate.get("is_valid_plate"):
+            plate_conf = plate.get("avg_ocr_confidence", plate["bbox"]["conf"])
+            plate_db_id = await create_plate_detection(PlateDetectionCreate(
+                plate_text=p_text,
+                province_code=plate.get("province_code", ""),
+                province_name=plate.get("province_name", ""),
+                vehicle_type=plate.get("vehicle_type", "unknown"),
+                is_valid=True,
+                avg_confidence=plate_conf,
+                confidence=plate_conf,
+                camera_id="IMAGE",
+                source_type="image",
+                source_file=file.filename,
+                plate_evidence_path=plate_ev_path,
+            ))
+            saved_p = dict(plate)
+            saved_p["db_id"] = plate_db_id
+            saved_p["plate_crop_path"] = plate_ev_path
+            saved_plates.append(saved_p)
+        else:
+            saved_plates.append(plate)
+
+    annotated_b64 = numpy_to_base64(evidence_source, quality=90)
+
+    return {
+        "filename": file.filename,
+        "timestamp": datetime.utcnow().isoformat(),
+        "vehicle_count": len(saved_vehicles),
+        "vehicles": saved_vehicles,
+        "counts_by_class": result.get("counts_by_class", {}),
+        "counts_by_category": result.get("counts_by_category", {}),
+        "violation_count": len(saved_violations),
+        "violations": saved_violations,
+        "counts_by_violation": result.get("counts_by_violation", {}),
+        "plate_count": len(saved_plates),
+        "plates": saved_plates,
+        "annotated_image_base64": annotated_b64,
+        "source_type": "image",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Excel Export
+# ---------------------------------------------------------------------------
+
+@app.get("/api/export/excel")
+async def export_excel(
+    data_types: Optional[str] = Query(None, description="Danh sách loại dữ liệu (phân cách dấu phẩy): vehicles, violations, plates"),
+    data_type: Optional[str] = Query(None, description="Tương thích ngược 1 loại dữ liệu"),
+    days: int = Query(7, ge=1, le=7, description="Số ngày gần nhất (tối đa 7 ngày)"),
+    limit: int = Query(1000, ge=1, le=1000, description="Số lượng dòng tối đa (tối đa 1000 dòng)"),
+):
+    """Export dữ liệu ra file Excel (.xlsx) với các ràng buộc tối đa 7 ngày và 1000 dòng. Hỗ trợ chọn nhiều loại dữ liệu."""
+    raw_types = data_types or data_type or "violations"
+    selected_types = [t.strip() for t in raw_types.split(",") if t.strip()]
+    valid_allowed = {"vehicles", "violations", "plates"}
+    
+    selected_types = [t for t in selected_types if t in valid_allowed]
+    if not selected_types:
+        raise HTTPException(400, "Vui lòng chọn ít nhất 1 loại dữ liệu hợp lệ: vehicles, violations, plates")
+
+    safe_days = min(max(1, days), 7)
+    safe_limit = min(max(1, limit), 1000)
+
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align = Alignment(horizontal="left", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin', color='CBD5E1'),
+            right=Side(style='thin', color='CBD5E1'),
+            top=Side(style='thin', color='CBD5E1'),
+            bottom=Side(style='thin', color='CBD5E1')
+        )
+
+        sheet_titles = {
+            "violations": "Vi_Pham",
+            "vehicles": "Phuong_Tien",
+            "plates": "Bien_So",
+        }
+
+        for dt in selected_types:
+            docs = await get_export_data(dt, days=safe_days, limit=safe_limit)
+            ws = wb.create_sheet(title=sheet_titles.get(dt, dt))
+
+            if dt == "violations":
+                headers = ["STT", "ID", "Thời gian", "Loại vi phạm", "Tên vi phạm", "Biển số xe", "Loại xe", "Độ tin cậy", "Nguồn"]
+                ws.append(headers)
+                for i, doc in enumerate(docs, 1):
+                    created_str = doc["created_at"].strftime("%d/%m/%Y %H:%M:%S") if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", ""))
+                    conf_pct = f"{doc.get('confidence', 0) * 100:.1f}%"
+                    ws.append([
+                        i,
+                        str(doc.get("_id", "")),
+                        created_str,
+                        doc.get("violation_type", ""),
+                        doc.get("violation_label", ""),
+                        doc.get("plate_text", "") or "-",
+                        doc.get("vehicle_class", "") or "-",
+                        conf_pct,
+                        doc.get("source_type", "")
+                    ])
+
+            elif dt == "vehicles":
+                headers = ["STT", "ID", "Thời gian", "Loại xe", "Nhóm phương tiện", "Độ tin cậy", "Nguồn", "File nguồn"]
+                ws.append(headers)
+                for i, doc in enumerate(docs, 1):
+                    created_str = doc["created_at"].strftime("%d/%m/%Y %H:%M:%S") if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", ""))
+                    conf_pct = f"{doc.get('confidence', 0) * 100:.1f}%"
+                    ws.append([
+                        i,
+                        str(doc.get("_id", "")),
+                        created_str,
+                        doc.get("vehicle_class", ""),
+                        doc.get("category", ""),
+                        conf_pct,
+                        doc.get("source_type", ""),
+                        doc.get("source_file", "") or doc.get("camera_id", "")
+                    ])
+
+            elif dt == "plates":
+                headers = ["STT", "ID", "Thời gian", "Biển số xe", "Tỉnh / Thành phố", "Loại phương tiện", "Trạng thái", "Độ tin cậy", "Nguồn"]
+                ws.append(headers)
+                for i, doc in enumerate(docs, 1):
+                    created_str = doc["created_at"].strftime("%d/%m/%Y %H:%M:%S") if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", ""))
+                    conf_val = doc.get("avg_confidence") if doc.get("avg_confidence") is not None else doc.get("confidence", 0.0)
+                    conf_pct = f"{float(conf_val or 0.0) * 100:.1f}%"
+                    is_valid = "Hợp lệ" if doc.get("is_valid") else "Không hợp lệ"
+                    ws.append([
+                        i,
+                        str(doc.get("_id", "")),
+                        created_str,
+                        doc.get("plate_text", ""),
+                        doc.get("province_name", ""),
+                        doc.get("vehicle_type", ""),
+                        is_valid,
+                        conf_pct,
+                        doc.get("source_type", "")
+                    ])
+
+            for col in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center_align
+
+            for row in range(2, len(docs) + 2):
+                for col in range(1, len(headers) + 1):
+                    cell = ws.cell(row=row, column=col)
+                    cell.border = thin_border
+                    if col == 1:
+                        cell.alignment = center_align
+                    else:
+                        cell.alignment = left_align
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = get_column_letter(col[0].column)
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        filename = f"export_{'_'.join(selected_types)}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    except ImportError:
+        import csv
+        output = io.BytesIO()
+        output.write(b'\xef\xbb\xbf')
+        text_output = io.StringIO()
+        writer = csv.writer(text_output)
+
+        for idx_dt, dt in enumerate(selected_types):
+            docs = await get_export_data(dt, days=safe_days, limit=safe_limit)
+            if idx_dt > 0:
+                writer.writerow([])
+                writer.writerow([f"=== BANG DU LIEU: {dt.upper()} ==="])
+                writer.writerow([])
+
+            if dt == "violations":
+                headers = ["STT", "ID", "Thời gian", "Loại vi phạm", "Tên vi phạm", "Biển số xe", "Loại xe", "Độ tin cậy", "Nguồn"]
+                writer.writerow(headers)
+                for i, doc in enumerate(docs, 1):
+                    created_str = doc["created_at"].strftime("%d/%m/%Y %H:%M:%S") if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", ""))
+                    conf_pct = f"{doc.get('confidence', 0) * 100:.1f}%"
+                    writer.writerow([
+                        i,
+                        str(doc.get("_id", "")),
+                        created_str,
+                        doc.get("violation_type", ""),
+                        doc.get("violation_label", ""),
+                        doc.get("plate_text", "") or "-",
+                        doc.get("vehicle_class", "") or "-",
+                        conf_pct,
+                        doc.get("source_type", "")
+                    ])
+            elif dt == "vehicles":
+                headers = ["STT", "ID", "Thời gian", "Loại xe", "Nhóm phương tiện", "Độ tin cậy", "Nguồn", "File nguồn"]
+                writer.writerow(headers)
+                for i, doc in enumerate(docs, 1):
+                    created_str = doc["created_at"].strftime("%d/%m/%Y %H:%M:%S") if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", ""))
+                    conf_pct = f"{doc.get('confidence', 0) * 100:.1f}%"
+                    writer.writerow([
+                        i,
+                        str(doc.get("_id", "")),
+                        created_str,
+                        doc.get("vehicle_class", ""),
+                        doc.get("category", ""),
+                        conf_pct,
+                        doc.get("source_type", ""),
+                        doc.get("source_file", "") or doc.get("camera_id", "")
+                    ])
+            elif dt == "plates":
+                headers = ["STT", "ID", "Thời gian", "Biển số xe", "Tỉnh / Thành phố", "Loại phương tiện", "Trạng thái", "Độ tin cậy", "Nguồn"]
+                writer.writerow(headers)
+                for i, doc in enumerate(docs, 1):
+                    created_str = doc["created_at"].strftime("%d/%m/%Y %H:%M:%S") if isinstance(doc.get("created_at"), datetime) else str(doc.get("created_at", ""))
+                    conf_val = doc.get("avg_confidence") if doc.get("avg_confidence") is not None else doc.get("confidence", 0.0)
+                    conf_pct = f"{float(conf_val or 0.0) * 100:.1f}%"
+                    is_valid = "Hợp lệ" if doc.get("is_valid") else "Không hợp lệ"
+                    writer.writerow([
+                        i,
+                        str(doc.get("_id", "")),
+                        created_str,
+                        doc.get("plate_text", ""),
+                        doc.get("province_name", ""),
+                        doc.get("vehicle_type", ""),
+                        is_valid,
+                        conf_pct,
+                        doc.get("source_type", "")
+                    ])
+
+        output.write(text_output.getvalue().encode('utf-8'))
+        output.seek(0)
+        filename = f"export_{'_'.join(selected_types)}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        media_type = "text/csv"
+
+    return StreamingResponse(
+        output,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
 
 
 

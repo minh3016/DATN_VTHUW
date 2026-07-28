@@ -7,6 +7,10 @@
         <p class="page-title-sub">Thống kê phát hiện vi phạm giao thông · 24 giờ qua</p>
       </div>
       <div class="header-actions">
+        <button class="btn btn--primary" @click="showExportModal = true">
+          <LucideIcon name="file-spreadsheet" :size="16" />
+          Xuất dữ liệu Excel
+        </button>
         <span class="badge" :class="backendOk ? 'badge--success' : 'badge--danger'">
           <span class="status-dot" :class="backendOk ? 'status-dot--online' : 'status-dot--offline'"></span>
           {{ backendOk ? 'AI Online' : 'AI Offline' }}
@@ -211,6 +215,122 @@
         </table>
       </div>
     </div>
+
+    <!-- Export Excel Modal -->
+    <div v-if="showExportModal" class="modal-overlay" @click.self="showExportModal = false">
+      <div class="modal-content" style="max-width:540px">
+        <div class="modal-header">
+          <h3 style="display:flex; align-items:center; gap:8px; margin:0">
+            <LucideIcon name="file-spreadsheet" :size="20" />
+            Xuất dữ liệu ra file Excel
+          </h3>
+          <button @click="showExportModal = false" class="modal-close">✕</button>
+        </div>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:18px">
+          
+          <!-- Data Type Selection -->
+          <div class="export-group">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <label class="export-label" style="margin:0">Loại dữ liệu cần xuất (Có thể chọn nhiều loại):</label>
+              <span class="mono" style="font-size:0.75rem; color:var(--text-muted)">Đã chọn: {{ exportTypes.length }}/3</span>
+            </div>
+            <div class="export-options-grid">
+              <div
+                class="export-option-card"
+                :class="{ 'export-option-card--active': exportTypes.includes('violations') }"
+                @click="toggleExportType('violations')"
+              >
+                <div class="export-check-badge">
+                  <LucideIcon :name="exportTypes.includes('violations') ? 'check-square' : 'square'" :size="16" />
+                </div>
+                <LucideIcon name="alert-triangle" :size="20" />
+                <div class="export-option-title">Vi phạm giao thông</div>
+                <div class="export-option-desc">Danh sách các lỗi vi phạm GT</div>
+              </div>
+
+              <div
+                class="export-option-card"
+                :class="{ 'export-option-card--active': exportTypes.includes('vehicles') }"
+                @click="toggleExportType('vehicles')"
+              >
+                <div class="export-check-badge">
+                  <LucideIcon :name="exportTypes.includes('vehicles') ? 'check-square' : 'square'" :size="16" />
+                </div>
+                <LucideIcon name="car" :size="20" />
+                <div class="export-option-title">Phương tiện</div>
+                <div class="export-option-desc">Lịch sử phát hiện xe lưu thông</div>
+              </div>
+
+              <div
+                class="export-option-card"
+                :class="{ 'export-option-card--active': exportTypes.includes('plates') }"
+                @click="toggleExportType('plates')"
+              >
+                <div class="export-check-badge">
+                  <LucideIcon :name="exportTypes.includes('plates') ? 'check-square' : 'square'" :size="16" />
+                </div>
+                <LucideIcon name="credit-card" :size="20" />
+                <div class="export-option-title">Biển số xe</div>
+                <div class="export-option-desc">Biển số xe được AI nhận diện</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Time range (Days) -->
+          <div class="export-group">
+            <label class="export-label">Khoảng thời gian (Tối đa 7 ngày gần nhất):</label>
+            <div class="export-days-row">
+              <button
+                v-for="d in [1, 3, 5, 7]"
+                :key="d"
+                class="btn-day-select"
+                :class="{ 'btn-day-select--active': exportDays === d }"
+                @click="exportDays = d"
+              >
+                {{ d }} ngày gần nhất
+              </button>
+            </div>
+          </div>
+
+          <!-- Max Limit -->
+          <div class="export-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
+              <label class="export-label" style="margin:0">Số dòng tối đa mỗi loại (Tối đa 1000 dòng):</label>
+              <span class="mono" style="font-weight:700; color:var(--accent-primary)">{{ exportLimit }} dòng / loại</span>
+            </div>
+            <input
+              type="range"
+              class="speed-slider"
+              min="100"
+              max="1000"
+              step="100"
+              v-model.number="exportLimit"
+            />
+          </div>
+
+          <!-- Constraint Notice -->
+          <div class="export-notice">
+            <LucideIcon name="info" :size="15" />
+            <span>Quy định hệ thống: Xuất dữ liệu tối đa 7 ngày gần nhất và không quá 1000 dòng cho mỗi loại dữ liệu. File Excel sẽ phân chia mỗi loại dữ liệu thành 1 Trang (Sheet) riêng biệt.</span>
+          </div>
+
+          <!-- Error message if any -->
+          <div v-if="exportError" class="vc-error" style="margin:0">
+            <LucideIcon name="alert-circle" :size="16" />
+            <span>{{ exportError }}</span>
+          </div>
+
+          <!-- Actions -->
+          <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:8px">
+            <button class="btn btn--ghost" @click="showExportModal = false">Hủy</button>
+            <button class="btn btn--primary" @click="handleExport" :disabled="isExporting || !exportTypes.length">
+              <LucideIcon :name="isExporting ? 'loader-2' : 'download'" :size="16" />
+              {{ isExporting ? 'Đang xuất file...' : 'Tải về file Excel' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -222,7 +342,7 @@ import {
   BarElement, CategoryScale, LinearScale,
 } from 'chart.js'
 import LucideIcon from '@/components/LucideIcon.vue'
-import { getStats, getViolationStats, getHealth, getViolations } from '@/api/index.js'
+import { getStats, getViolationStats, getHealth, getViolations, exportExcel } from '@/api/index.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale)
 
@@ -231,6 +351,58 @@ const violStats = ref({ total_violations: 0, by_type: {} })
 const backendOk = ref(false)
 const recentViolations = ref([])
 const plateCount = ref(0)
+
+// Export Excel Modal State
+const showExportModal = ref(false)
+const exportTypes = ref(['violations', 'vehicles', 'plates']) // Multi-select array
+const exportDays = ref(7)
+const exportLimit = ref(1000)
+const isExporting = ref(false)
+const exportError = ref(null)
+
+function toggleExportType(type) {
+  const idx = exportTypes.value.indexOf(type)
+  if (idx > -1) {
+    if (exportTypes.value.length > 1) {
+      exportTypes.value.splice(idx, 1)
+    }
+  } else {
+    exportTypes.value.push(type)
+  }
+}
+
+async function handleExport() {
+  if (isExporting.value || !exportTypes.value.length) return
+  isExporting.value = true
+  exportError.value = null
+
+  const days = Math.min(Math.max(1, exportDays.value), 7)
+  const limit = Math.min(Math.max(1, exportLimit.value), 1000)
+
+  try {
+    const blobData = await exportExcel({
+      dataTypes: exportTypes.value,
+      days,
+      limit,
+    })
+
+    const url = window.URL.createObjectURL(new Blob([blobData]))
+    const link = document.createElement('a')
+    link.href = url
+    const timestamp = new Date().toISOString().slice(0, 10)
+    link.setAttribute('download', `export_${exportTypes.value.join('_')}_${timestamp}.xlsx`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+
+    showExportModal.value = false
+  } catch (err) {
+    exportError.value = err.message || 'Xuất dữ liệu thất bại'
+  } finally {
+    isExporting.value = false
+  }
+}
 
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
 const VIOL_LABELS = { no_helmet: 'Không đội MBH', no_seatbelt: 'Không thắt dây', using_phone: 'Dùng điện thoại' }
@@ -406,4 +578,38 @@ onUnmounted(() => clearInterval(timer))
 
 /* Header actions */
 .header-actions { display: flex; gap: var(--sp-sm); align-items: center; }
+
+/* Export Modal Styles */
+.export-group { display: flex; flex-direction: column; gap: 8px; }
+.export-label { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.export-options-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.export-option-card {
+  position: relative;
+  background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 14px 10px; text-align: center; cursor: pointer; transition: all var(--transition-fast);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text-muted);
+}
+.export-check-badge { position: absolute; top: 8px; right: 8px; color: var(--text-muted); opacity: 0.5; }
+.export-option-card:hover { border-color: var(--accent-primary); color: var(--text-primary); background: rgba(37,99,235,0.03); }
+.export-option-card--active {
+  border-color: var(--accent-primary); background: rgba(37,99,235,0.1); color: var(--accent-primary); font-weight: 600;
+}
+.export-option-card--active .export-check-badge { color: var(--accent-primary); opacity: 1; }
+.export-option-title { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.export-option-desc { font-size: 0.72rem; color: var(--text-muted); line-height: 1.3; }
+
+.export-days-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.btn-day-select {
+  padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid var(--border-color);
+  background: var(--bg-inset); color: var(--text-secondary); font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; transition: all var(--transition-fast); text-align: center;
+}
+.btn-day-select:hover { border-color: var(--accent-primary); color: var(--text-primary); }
+.btn-day-select--active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+
+.export-notice {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px;
+  background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.15); border-radius: var(--radius-md);
+  font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4;
+}
 </style>

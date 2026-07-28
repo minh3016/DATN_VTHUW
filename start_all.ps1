@@ -45,7 +45,7 @@ if (-not (Test-Path $venvPython)) {
 
 Start-Process -FilePath "powershell" -ArgumentList @(
     "-NoExit", "-Command",
-    "Set-Location '$BackendDir'; Write-Host '[Backend]' -ForegroundColor Cyan; & '$venvPython' -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    "Set-Location '$BackendDir'; Write-Host '[Backend]' -ForegroundColor Cyan; & '$venvPython' -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 ) -WindowStyle Normal
 
 Write-Host "  Backend terminal da mo" -ForegroundColor Green

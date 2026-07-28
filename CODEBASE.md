@@ -3,19 +3,24 @@
 > Hệ thống phát hiện vi phạm giao thông sử dụng 4 model AI YOLOv8n.
 > Cập nhật: 2026-07-19
 >
-> **Thay đổi đáng chú ý kể từ bản cập nhật trước (2026-07-19, cùng ngày – khắc phục giật lag & đếm trùng/nhảy ID):**
-> - **Tích hợp Object Tracking thật (ByteTrack)** qua module mới `backend/app/utils/tracker.py` (dùng `ultralytics.trackers.BYTETracker`) — thay thế cơ chế dedup ad-hoc IOU/buffer trước đây. Mỗi phương tiện được gán 1 `track_id` ổn định xuyên suốt các frame (Kalman filter + Hungarian assignment), giải quyết triệt để lỗi **đếm trùng 1 xe** khi bị che khuất tạm thời và lỗi **"nhảy ID"** khiến vi phạm bị gán sai/tính trùng. Có cờ `ENABLE_OBJECT_TRACKING` (mặc định `true`) để rollback về dedup buffer cũ nếu cần.
-> - Mỗi video-analysis job và mỗi camera stream có **1 tracker instance riêng** (không chia sẻ giữa các luồng chạy song song) — tránh trộn lẫn track_id giữa các video/camera khác nhau.
-> - Vi phạm được định danh theo `(vehicle_track_id, violation_type)` thay vì so khớp IOU mỗi frame; vẫn giữ cơ chế fallback dedup kiểu cũ cho phần nhỏ vi phạm không khớp không gian được với xe nào có track_id.
-> - **Sửa lỗi chặn event loop** ở `_stream_mjpeg()` (stream camera trực tiếp): inference AI giờ chạy qua `run_in_executor` giống `_analyze_video_task()`, không còn chặn WebSocket/HTTP khác trong lúc xử lý 1 frame — nguyên nhân chính gây giật lag khi xem stream.
-> - **Throttle WebSocket**: `websocket_manager.broadcast()` gửi song song (`asyncio.gather` + timeout) thay vì tuần tự; tần suất broadcast `frame_result`/`upload_progress` được giới hạn tối thiểu 150ms/room (`WS_BROADCAST_MIN_INTERVAL_MS`) — tách khỏi tần suất xử lý AI/lưu DB (không đổi).
-> - **Ảnh preview WebSocket thu nhỏ riêng** (`WS_PREVIEW_MAX_WIDTH=960`, quality=70), tách biệt với ảnh full-res dùng lưu evidence trên đĩa.
-> - Frontend: tách ảnh preview realtime ra component riêng **`LivePreviewFrame.vue`** (mới) + coalesce cập nhật qua `requestAnimationFrame` trong `UploadAnalysis.vue` và `VideoStream.vue` — tránh mỗi frame ảnh mới làm re-render toàn bộ card/component cha.
-> - Thêm `lap>=0.5.12` vào `requirements.txt` (dependency bắt buộc của `BYTETracker`).
-> - Thêm log `processing_ms` + `active_tracks` định kỳ trong `_analyze_video_task()`/`_stream_mjpeg()` để giám sát hiệu năng và số track đang hoạt động.
+> **Thay đổi mới nhất (2026-07-28 - Cải tiến Dashboard & Export Excel, Phân tích Ảnh):**
+> - **Cải tiến trang Dashboard & Tính năng Xuất dữ liệu Excel**:
+>   - Backend: Thêm endpoint `GET /api/export/excel` trong `main.py` và hàm `get_export_data()` trong `database.py`. Cho phép xuất 3 loại dữ liệu (`vehicles`, `violations`, `plates`) ra file `.xlsx` (dùng `openpyxl`). Ràng buộc khóa cứng tối đa 7 ngày gần nhất và không quá 1.000 dòng.
+>   - Frontend: Thêm nút **Xuất dữ liệu Excel** và **Modal Export Excel** trong `Dashboard.vue`, bổ sung hàm `exportExcel()` trong `api/index.js`.
+> - **Khôi phục hoàn toàn tính năng phân tích ảnh đơn lẻ (Single Image Analysis)**:
+>   - Backend `main.py`: Thêm API endpoint `POST /api/analyze/image` nhận upload file ảnh, chạy qua pipeline AI `_process_frame`, lưu kết quả vào MongoDB với `source_type="image"` và trả về `annotated_image_base64`.
+>   - Frontend UI `UploadAnalysis.vue`: Thêm thanh chuyển Chế độ phân tích (**Phân tích Video** & **Phân tích Ảnh**).
+
 >
-> **Thay đổi kể từ bản cập nhật trước đó (2026-07-09):**
-> - Đã **bỏ hoàn toàn chế độ phân tích ảnh đơn lẻ** (Image mode) khỏi `UploadAnalysis.vue` và `api/index.js` (còn comment `// (Image analysis removed)`). Endpoint `POST /api/analyze/image` cũng đã bị gỡ khỏi `main.py` (chỉ còn sót trong docstring đầu file).
+> **Thay đổi kể từ bản cập nhật trước (2026-07-19 – khắc phục giật lag & đếm trùng/nhảy ID):**
+> - **Tích hợp Object Tracking thật (ByteTrack)** qua module mới `backend/app/utils/tracker.py` (dùng `ultralytics.trackers.BYTETracker`) — thay thế cơ chế dedup ad-hoc IOU/buffer trước đây. Mỗi phương tiện được gán 1 `track_id` ổn định xuyên suốt các frame (Kalman filter + Hungarian assignment).
+> - Mỗi video-analysis job và mỗi camera stream có **1 tracker instance riêng** (không chia sẻ giữa các luồng chạy song song).
+> - Vi phạm được định danh theo `(vehicle_track_id, violation_type)` thay vì so khớp IOU mỗi frame.
+> - **Sửa lỗi chặn event loop** ở `_stream_mjpeg()`: inference AI chạy qua `run_in_executor`.
+> - **Throttle WebSocket**: `websocket_manager.broadcast()` gửi song song với tần suất broadcast giới hạn tối thiểu 150ms/room.
+> - **Ảnh preview WebSocket thu nhỏ riêng** (`WS_PREVIEW_MAX_WIDTH=960`, quality=70).
+> - Frontend: tách ảnh preview realtime ra component riêng **`LivePreviewFrame.vue`** + coalesce cập nhật qua `requestAnimationFrame`.
+
 > - `UploadAnalysis.vue` viết lại thành trang **phân tích nhiều video đồng thời** (multi-file), có **thanh trượt tốc độ** (frame_skip), **Tạm dừng/Tiếp tục** và **thanh trượt tua đến frame (seek)** cho từng job.
 > - Backend bổ sung 3 endpoint điều khiển: `POST /api/upload/{job_id}/pause`, `/resume`, `/seek`.
 > - Thêm collection **`plate_detections`** (lịch sử nhận diện biển số riêng biệt) + trang **`PlateHistory.vue`** (`/plates`) + module **`plate_validator.py`** (validate biển số chuẩn Việt Nam, sửa lỗi OCR).

@@ -381,6 +381,9 @@ async def create_plate_detection(data: PlateDetectionCreate) -> Optional[str]:
         return None
     doc = data.model_dump()
     doc["created_at"] = datetime.utcnow()
+    conf = doc.get("avg_confidence") or doc.get("confidence") or 0.0
+    doc["avg_confidence"] = conf
+    doc["confidence"] = conf
     result = await _db["plate_detections"].insert_one(doc)
     return str(result.inserted_id)
 
@@ -488,4 +491,40 @@ async def get_plate_stats(hours: int = 24) -> dict:
         "unique_provinces": len(by_province),
         "by_province": by_province,
     }
+
+
+# ---------------------------------------------------------------------------
+# Export helper
+# ---------------------------------------------------------------------------
+
+async def get_export_data(data_type: str, days: int = 7, limit: int = 1000) -> List[dict]:
+    """Lấy dữ liệu phục vụ export Excel (khóa cứng max 7 ngày, max 1000 bản ghi)"""
+    if _db is None:
+        return []
+
+    safe_days = min(max(1, days), 7)
+    safe_limit = min(max(1, limit), 1000)
+    since = datetime.utcnow() - timedelta(days=safe_days)
+
+    collection_map = {
+        "vehicles": "detections",
+        "violations": "violations",
+        "plates": "plate_detections",
+    }
+
+    coll_name = collection_map.get(data_type)
+    if not coll_name:
+        return []
+
+    cursor = (
+        _db[coll_name]
+        .find({"created_at": {"$gte": since}})
+        .sort("created_at", DESCENDING)
+        .limit(safe_limit)
+    )
+    docs = await cursor.to_list(length=safe_limit)
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+    return docs
+
 

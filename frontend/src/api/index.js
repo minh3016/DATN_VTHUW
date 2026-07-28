@@ -54,7 +54,15 @@ export const deletePlateDetection = (id) =>
 export const getPlateStats = (hours = 24) =>
   api.get('/api/plates/stats', { params: { hours } })
 
-// ── (Image analysis removed) ──────────────────────────────────
+// ── Image Analysis ────────────────────────────────────────────
+export const analyzeImage = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/api/analyze/image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  })
+}
 
 // ── Video Upload & Analysis ───────────────────────────────────
 export const uploadVideo = (file, onProgress = null) => {
@@ -90,6 +98,15 @@ export const seekAnalysis = (jobId, frame) =>
 export const getEvidenceUrl = (evidencePath) => {
   if (!evidencePath) return ''
   return `${API_BASE}/api/${evidencePath}`
+}
+
+// ── Export Excel ──────────────────────────────────────────────
+export const exportExcel = ({ dataTypes, dataType, days = 7, limit = 1000 }) => {
+  const typesParam = Array.isArray(dataTypes) ? dataTypes.join(',') : (dataTypes || dataType)
+  return api.get('/api/export/excel', {
+    params: { data_types: typesParam, days, limit },
+    responseType: 'blob',
+  })
 }
 
 // ── WebSocket (for upload progress) ───────────────────────────

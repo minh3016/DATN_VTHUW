@@ -120,7 +120,7 @@ const modelsStatus = reactive({
 
 const navItems = [
   { path: '/', icon: 'layout-dashboard', label: 'Tổng quan', exact: true },
-  { path: '/upload', icon: 'film', label: 'Phân tích Video', exact: false },
+  { path: '/upload', icon: 'film', label: 'Phân tích ảnh và video', exact: false },
   { path: '/violations', icon: 'alert-triangle', label: 'Vi phạm giao thông', exact: false },
   { path: '/history', icon: 'car', label: 'Lịch sử phương tiện', exact: false },
   { path: '/plates', icon: 'credit-card', label: 'Biển số xe', exact: false },

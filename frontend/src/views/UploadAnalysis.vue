@@ -2,223 +2,362 @@
   <div class="page-container">
     <div class="page-title-section">
       <div>
-        <h1>Phân tích Video</h1>
-        <p class="page-title-sub">Tải lên video để phát hiện vi phạm giao thông bằng AI YOLOv8n · Hỗ trợ nhiều video đồng thời</p>
+        <h1>Phân tích Dữ liệu AI</h1>
+        <p class="page-title-sub">Tải lên video hoặc ảnh tĩnh để phát hiện vi phạm giao thông bằng AI YOLOv8n</p>
       </div>
     </div>
 
-    <!-- Upload zone + Settings -->
-    <div class="upload-settings-row">
-      <!-- Drop zone -->
-      <div
-        class="drop-zone"
-        :class="{ 'drop-zone--active': dragOver }"
-        @dragover.prevent="dragOver = true"
-        @dragleave="dragOver = false"
-        @drop.prevent="handleDrop"
-        @click="$refs.fileInput.click()"
+    <!-- Mode Tabs -->
+    <div class="analysis-mode-tabs">
+      <button
+        class="mode-tab"
+        :class="{ 'mode-tab--active': activeMode === 'video' }"
+        @click="activeMode = 'video'"
       >
-        <input ref="fileInput" type="file" accept="video/mp4,video/avi,video/x-msvideo,video/quicktime,video/x-matroska" multiple style="display:none" @change="handleFileSelect" />
-        <div class="drop-content">
-          <div class="drop-icon-wrap"><LucideIcon name="film" :size="40" /></div>
-          <p class="drop-title">Kéo thả video vào đây</p>
-          <p class="drop-sub">hoặc nhấn để chọn file · MP4, AVI, MOV, MKV · Tối đa 10 phút · 500MB · Chọn nhiều file</p>
-        </div>
-      </div>
-
-      <!-- Speed slider -->
-      <div class="speed-panel">
-        <h3><LucideIcon name="gauge" :size="16" /> Tốc độ phân tích</h3>
-        <div class="speed-slider-wrap">
-          <input
-            type="range"
-            class="speed-slider"
-            :min="0"
-            :max="speedSteps.length - 1"
-            v-model.number="speedIndex"
-          />
-          <div class="speed-labels">
-            <span v-for="(s, i) in speedSteps" :key="s" class="speed-label" :class="{ 'speed-label--active': i === speedIndex }">
-              x{{ s }}
-            </span>
-          </div>
-        </div>
-        <div class="speed-info">
-          <span class="speed-badge">x{{ currentSpeed }}</span>
-          <span class="speed-desc" v-if="currentSpeed === 1">Phân tích tất cả frame (chính xác nhất)</span>
-          <span class="speed-desc" v-else>Bỏ qua {{ currentSpeed - 1 }} frame, phân tích mỗi frame thứ {{ currentSpeed }} (nhanh gấp ~{{ currentSpeed }} lần)</span>
-        </div>
-        <div class="speed-note">
-          <LucideIcon name="info" :size="13" />
-          Tốc độ áp dụng cho video <strong>chưa bắt đầu</strong> phân tích. Tối đa 2 video phân tích đồng thời.
-        </div>
-      </div>
+        <LucideIcon name="film" :size="18" /> Phân tích Video
+      </button>
+      <button
+        class="mode-tab"
+        :class="{ 'mode-tab--active': activeMode === 'image' }"
+        @click="activeMode = 'image'"
+      >
+        <LucideIcon name="image" :size="18" /> Phân tích Ảnh
+      </button>
     </div>
 
-    <!-- Video List -->
-    <div v-if="videoJobs.length" class="video-list-section">
-      <div class="video-list-header">
-        <h2><LucideIcon name="list-video" :size="18" /> Danh sách video ({{ videoJobs.length }})</h2>
-        <button v-if="videoJobs.length > 1" class="btn btn--ghost btn--sm" @click="clearAllCompleted">
-          <LucideIcon name="trash-2" :size="14" /> Xóa video đã hoàn tất
-        </button>
+    <!-- Mode 1: Video Analysis -->
+    <div v-if="activeMode === 'video'" class="mode-content">
+      <!-- Upload zone + Settings -->
+      <div class="upload-settings-row">
+        <!-- Drop zone -->
+        <div
+          class="drop-zone"
+          :class="{ 'drop-zone--active': dragOver }"
+          @dragover.prevent="dragOver = true"
+          @dragleave="dragOver = false"
+          @drop.prevent="handleDrop"
+          @click="$refs.fileInput.click()"
+        >
+          <input ref="fileInput" type="file" accept="video/mp4,video/avi,video/x-msvideo,video/quicktime,video/x-matroska" multiple style="display:none" @change="handleFileSelect" />
+          <div class="drop-content">
+            <div class="drop-icon-wrap"><LucideIcon name="film" :size="40" /></div>
+            <p class="drop-title">Kéo thả video vào đây</p>
+            <p class="drop-sub">hoặc nhấn để chọn file · MP4, AVI, MOV, MKV · Tối đa 10 phút · 500MB · Chọn nhiều file</p>
+          </div>
+        </div>
+
+        <!-- Speed slider -->
+        <div class="speed-panel">
+          <h3><LucideIcon name="gauge" :size="16" /> Tốc độ phân tích</h3>
+          <div class="speed-slider-wrap">
+            <input
+              type="range"
+              class="speed-slider"
+              :min="0"
+              :max="speedSteps.length - 1"
+              v-model.number="speedIndex"
+            />
+            <div class="speed-labels">
+              <span v-for="(s, i) in speedSteps" :key="s" class="speed-label" :class="{ 'speed-label--active': i === speedIndex }">
+                x{{ s }}
+              </span>
+            </div>
+          </div>
+          <div class="speed-info">
+            <span class="speed-badge">x{{ currentSpeed }}</span>
+            <span class="speed-desc" v-if="currentSpeed === 1">Phân tích tất cả frame (chính xác nhất)</span>
+            <span class="speed-desc" v-else>Bỏ qua {{ currentSpeed - 1 }} frame, phân tích mỗi frame thứ {{ currentSpeed }} (nhanh gấp ~{{ currentSpeed }} lần)</span>
+          </div>
+          <div class="speed-note">
+            <LucideIcon name="info" :size="13" />
+            Tốc độ áp dụng cho video <strong>chưa bắt đầu</strong> phân tích. Tối đa 2 video phân tích đồng thời.
+          </div>
+        </div>
       </div>
 
-      <div class="video-cards">
-        <div v-for="(job, idx) in videoJobs" :key="job.id" class="video-card" :class="`video-card--${job.state}`">
-          <!-- Card Header -->
-          <div class="vc-header">
-            <div class="vc-info">
-              <div class="vc-title-row">
-                <span class="vc-idx">{{ idx + 1 }}</span>
-                <LucideIcon name="file-video" :size="18" />
-                <span class="vc-name">{{ job.filename }}</span>
-              </div>
-              <div class="vc-meta">
-                <span>{{ formatSize(job.file_size) }}</span>
-                <span v-if="job.duration_sec"> · {{ formatDuration(job.duration_sec) }}</span>
-                <span v-if="job.frame_skip > 1"> · Tua x{{ job.frame_skip }}</span>
-              </div>
-            </div>
-            <div class="vc-status-actions">
-              <span class="vc-status-badge" :class="`status--${job.state}`">{{ stateLabel(job.state) }}</span>
-              <button v-if="job.state === 'pending' || job.state === 'uploaded'" class="btn--icon btn--icon-danger" @click="removeJob(idx)" title="Xóa">
-                <LucideIcon name="x" :size="16" />
-              </button>
-            </div>
-          </div>
+      <!-- Video List -->
+      <div v-if="videoJobs.length" class="video-list-section">
+        <div class="video-list-header">
+          <h2><LucideIcon name="list-video" :size="18" /> Danh sách video ({{ videoJobs.length }})</h2>
+          <button v-if="videoJobs.length > 1" class="btn btn--ghost btn--sm" @click="clearAllCompleted">
+            <LucideIcon name="trash-2" :size="14" /> Xóa video đã hoàn tất
+          </button>
+        </div>
 
-          <!-- Upload progress -->
-          <div v-if="job.state === 'uploading'" class="vc-progress-section">
-            <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--upload" :style="{ width: job.uploadProgress + '%' }"></div></div>
-            <span class="vc-progress-text">Đang upload: {{ job.uploadProgress }}%</span>
-          </div>
-
-          <!-- Analysis progress + controls -->
-          <div v-if="job.state === 'processing' || job.state === 'paused'" class="vc-progress-section">
-            <div class="vc-controls-row">
-              <button class="btn--icon-control" @click="togglePause(job)" :title="job.paused ? 'Tiếp tục' : 'Tạm dừng'">
-                <LucideIcon :name="job.paused ? 'play' : 'pause'" :size="16" />
-              </button>
-              <div class="progress-bar" style="flex:1"><div class="progress-bar__fill" :style="{ width: Math.round((job.progress||0)*100) + '%' }"></div></div>
-              <span class="vc-pct">{{ Math.round((job.progress||0)*100) }}%</span>
-            </div>
-            <div class="vc-progress-details">
-              <span>{{ job.processed_frames||0 }}/{{ job.total_frames||'?' }} frames</span>
-              <span v-if="job.paused" class="vc-paused-badge"><LucideIcon name="pause" :size="12" /> Đã tạm dừng</span>
-              <span class="vc-live-stats">
-                <LucideIcon name="car" :size="13" /> {{ job.vehicles_detected||0 }}
-                <LucideIcon name="alert-triangle" :size="13" /> {{ job.violations_detected||0 }}
-                <LucideIcon name="credit-card" :size="13" /> {{ job.plates_detected||0 }}
-              </span>
-            </div>
-
-            <!-- Frame seek slider -->
-            <div v-if="job.total_frames" class="vc-seek-section">
-              <label class="vc-seek-label"><LucideIcon name="skip-forward" :size="13" /> Tua đến frame:</label>
-              <div class="vc-seek-row">
-                <input
-                  type="range"
-                  class="vc-seek-slider"
-                  :min="0"
-                  :max="job.total_frames"
-                  :value="job.seekValue ?? job.processed_frames"
-                  @input="job.seekValue = Number($event.target.value)"
-                  @change="seekToFrame(job, Number($event.target.value))"
-                />
-                <span class="vc-seek-val">{{ job.seekValue ?? job.processed_frames }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Live preview frame (component riêng để đổi ảnh không kéo theo re-render cả card) -->
-          <LivePreviewFrame
-            v-if="job.state === 'processing' || job.state === 'paused'"
-            :frame="latestFrames[job.job_id]"
-          />
-
-          <!-- Actions: Start analysis -->
-          <div v-if="job.state === 'uploaded'" class="vc-actions">
-            <button class="btn btn--primary" @click="startJobAnalysis(job)" :disabled="job.starting">
-              <LucideIcon name="play" :size="16" />
-              {{ job.starting ? 'Đang khởi tạo...' : 'Bắt đầu phân tích' }}
-            </button>
-          </div>
-
-          <!-- Completed results -->
-          <div v-if="job.state === 'completed'" class="vc-results">
-            <div class="vc-stats-row">
-              <div class="rs-card rs-card--blue"><LucideIcon name="car" :size="18" /><span class="rs-val">{{ job.vehicles_detected||0 }}</span><span class="rs-label">Phương tiện</span></div>
-              <div class="rs-card rs-card--red"><LucideIcon name="alert-triangle" :size="18" /><span class="rs-val">{{ job.violations_detected||0 }}</span><span class="rs-label">Vi phạm</span></div>
-              <div class="rs-card rs-card--yellow"><LucideIcon name="credit-card" :size="18" /><span class="rs-val">{{ job.plates_detected||0 }}</span><span class="rs-label">Biển số</span></div>
-            </div>
-
-            <!-- Breakdown badges -->
-            <div v-if="job.counts_by_violation && Object.keys(job.counts_by_violation).length" class="vc-badges-row">
-              <span v-for="(cnt, vtype) in job.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype">
-                {{ violLabel(vtype) }}: {{ cnt }}
-              </span>
-            </div>
-            <div v-if="job.counts_by_class && Object.keys(job.counts_by_class).length" class="vc-badges-row">
-              <span v-for="(cnt, cls) in job.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)">
-                {{ classLabel(cls) }}: {{ cnt }}
-              </span>
-            </div>
-
-            <!-- Expandable results -->
-            <button class="btn btn--ghost btn--sm vc-expand-btn" @click="job.expanded = !job.expanded">
-              <LucideIcon :name="job.expanded ? 'chevron-up' : 'chevron-down'" :size="16" />
-              {{ job.expanded ? 'Thu gọn chi tiết' : 'Xem chi tiết vi phạm & phương tiện' }}
-            </button>
-
-            <div v-if="job.expanded" class="vc-detail-section animate-fade-in">
-              <!-- Violations -->
-              <div v-if="job.violations.length" class="detections-list violations-list">
-                <h3><LucideIcon name="alert-triangle" :size="16" /> Vi phạm phát hiện ({{ job.violations.length }})</h3>
-                <div class="det-grid">
-                  <div v-for="(viol, i) in job.violations" :key="'vv'+i" class="det-item det-item--violation">
-                    <div class="det-item__left">
-                      <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
-                      <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
-                      <span class="conf-bar__label">{{ (viol.confidence * 100).toFixed(0) }}%</span>
-                      <span v-if="viol.plate_text" class="plate-text" style="font-size:0.8rem">{{ viol.plate_text }}</span>
-                    </div>
-                    <img v-if="viol.evidence_path" :src="getEvidenceUrl(viol.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = viol" title="Xem bằng chứng" />
-                  </div>
+        <div class="video-cards">
+          <div v-for="(job, idx) in videoJobs" :key="job.id" class="video-card" :class="`video-card--${job.state}`">
+            <!-- Card Header -->
+            <div class="vc-header">
+              <div class="vc-info">
+                <div class="vc-title-row">
+                  <span class="vc-idx">{{ idx + 1 }}</span>
+                  <LucideIcon name="file-video" :size="18" />
+                  <span class="vc-name">{{ job.filename }}</span>
+                </div>
+                <div class="vc-meta">
+                  <span>{{ formatSize(job.file_size) }}</span>
+                  <span v-if="job.duration_sec"> · {{ formatDuration(job.duration_sec) }}</span>
+                  <span v-if="job.frame_skip > 1"> · Tua x{{ job.frame_skip }}</span>
                 </div>
               </div>
+              <div class="vc-status-actions">
+                <span class="vc-status-badge" :class="`status--${job.state}`">{{ stateLabel(job.state) }}</span>
+                <button v-if="job.state === 'pending' || job.state === 'uploaded'" class="btn--icon btn--icon-danger" @click="removeJob(idx)" title="Xóa">
+                  <LucideIcon name="x" :size="16" />
+                </button>
+              </div>
+            </div>
 
-              <!-- Vehicles -->
-              <div v-if="job.detections.length" class="detections-list">
-                <h3><LucideIcon name="car" :size="16" /> Phương tiện phát hiện ({{ job.detections.length }})</h3>
-                <div class="det-grid">
-                  <div v-for="(v, i) in job.detections" :key="'vd'+i" class="det-item" :class="`det-item--${v.category}`">
-                    <div class="det-item__left">
-                      <span class="det-idx">{{ i + 1 }}</span>
-                      <span class="badge" :class="classBadge(v.vehicle_class)">{{ classLabel(v.vehicle_class) }}</span>
-                      <span class="conf-bar__label">{{ (v.confidence * 100).toFixed(0) }}%</span>
-                    </div>
-                    <img v-if="v.evidence_path" :src="getEvidenceUrl(v.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = v" title="Xem ảnh" />
-                  </div>
+            <!-- Upload progress -->
+            <div v-if="job.state === 'uploading'" class="vc-progress-section">
+              <div class="progress-bar"><div class="progress-bar__fill progress-bar__fill--upload" :style="{ width: job.uploadProgress + '%' }"></div></div>
+              <span class="vc-progress-text">Đang upload: {{ job.uploadProgress }}%</span>
+            </div>
+
+            <!-- Analysis progress + controls -->
+            <div v-if="job.state === 'processing' || job.state === 'paused'" class="vc-progress-section">
+              <div class="vc-controls-row">
+                <button class="btn--icon-control" @click="togglePause(job)" :title="job.paused ? 'Tiếp tục' : 'Tạm dừng'">
+                  <LucideIcon :name="job.paused ? 'play' : 'pause'" :size="16" />
+                </button>
+                <div class="progress-bar" style="flex:1"><div class="progress-bar__fill" :style="{ width: Math.round((job.progress||0)*100) + '%' }"></div></div>
+                <span class="vc-pct">{{ Math.round((job.progress||0)*100) }}%</span>
+              </div>
+              <div class="vc-progress-details">
+                <span>{{ job.processed_frames||0 }}/{{ job.total_frames||'?' }} frames</span>
+                <span v-if="job.paused" class="vc-paused-badge"><LucideIcon name="pause" :size="12" /> Đã tạm dừng</span>
+                <span class="vc-live-stats">
+                  <LucideIcon name="car" :size="13" /> {{ job.vehicles_detected||0 }}
+                  <LucideIcon name="alert-triangle" :size="13" /> {{ job.violations_detected||0 }}
+                  <LucideIcon name="credit-card" :size="13" /> {{ job.plates_detected||0 }}
+                </span>
+              </div>
+
+              <!-- Frame seek slider -->
+              <div v-if="job.total_frames" class="vc-seek-section">
+                <label class="vc-seek-label"><LucideIcon name="skip-forward" :size="13" /> Tua đến frame:</label>
+                <div class="vc-seek-row">
+                  <input
+                    type="range"
+                    class="vc-seek-slider"
+                    :min="0"
+                    :max="job.total_frames"
+                    :value="job.seekValue ?? job.processed_frames"
+                    @input="job.seekValue = Number($event.target.value)"
+                    @change="seekToFrame(job, Number($event.target.value))"
+                  />
+                  <span class="vc-seek-val">{{ job.seekValue ?? job.processed_frames }}</span>
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- Error state -->
-          <div v-if="job.state === 'error'" class="vc-error">
-            <LucideIcon name="alert-circle" :size="16" />
-            <span>{{ job.error_message || 'Lỗi không xác định' }}</span>
-            <button class="btn btn--ghost btn--sm" @click="retryJob(job)">Thử lại</button>
+            <!-- Live preview frame -->
+            <LivePreviewFrame
+              v-if="job.state === 'processing' || job.state === 'paused'"
+              :frame="latestFrames[job.job_id]"
+            />
+
+            <!-- Actions: Start analysis -->
+            <div v-if="job.state === 'uploaded'" class="vc-actions">
+              <button class="btn btn--primary" @click="startJobAnalysis(job)" :disabled="job.starting">
+                <LucideIcon name="play" :size="16" />
+                {{ job.starting ? 'Đang khởi tạo...' : 'Bắt đầu phân tích' }}
+              </button>
+            </div>
+
+            <!-- Completed results -->
+            <div v-if="job.state === 'completed'" class="vc-results">
+              <div class="vc-stats-row">
+                <div class="rs-card rs-card--blue"><LucideIcon name="car" :size="18" /><span class="rs-val">{{ job.vehicles_detected||0 }}</span><span class="rs-label">Phương tiện</span></div>
+                <div class="rs-card rs-card--red"><LucideIcon name="alert-triangle" :size="18" /><span class="rs-val">{{ job.violations_detected||0 }}</span><span class="rs-label">Vi phạm</span></div>
+                <div class="rs-card rs-card--yellow"><LucideIcon name="credit-card" :size="18" /><span class="rs-val">{{ job.plates_detected||0 }}</span><span class="rs-label">Biển số</span></div>
+              </div>
+
+              <!-- Breakdown badges -->
+              <div v-if="job.counts_by_violation && Object.keys(job.counts_by_violation).length" class="vc-badges-row">
+                <span v-for="(cnt, vtype) in job.counts_by_violation" :key="vtype" class="badge badge--violation" :class="'viol--' + vtype">
+                  {{ violLabel(vtype) }}: {{ cnt }}
+                </span>
+              </div>
+              <div v-if="job.counts_by_class && Object.keys(job.counts_by_class).length" class="vc-badges-row">
+                <span v-for="(cnt, cls) in job.counts_by_class" :key="cls" class="badge" :class="classBadge(cls)">
+                  {{ classLabel(cls) }}: {{ cnt }}
+                </span>
+              </div>
+
+              <!-- Expandable results -->
+              <button class="btn btn--ghost btn--sm vc-expand-btn" @click="job.expanded = !job.expanded">
+                <LucideIcon :name="job.expanded ? 'chevron-up' : 'chevron-down'" :size="16" />
+                {{ job.expanded ? 'Thu gọn chi tiết' : 'Xem chi tiết vi phạm & phương tiện' }}
+              </button>
+
+              <div v-if="job.expanded" class="vc-detail-section animate-fade-in">
+                <!-- Violations -->
+                <div v-if="job.violations.length" class="detections-list violations-list">
+                  <h3><LucideIcon name="alert-triangle" :size="16" /> Vi phạm phát hiện ({{ job.violations.length }})</h3>
+                  <div class="det-grid">
+                    <div v-for="(viol, i) in job.violations" :key="'vv'+i" class="det-item det-item--violation">
+                      <div class="det-item__left">
+                        <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
+                        <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
+                        <span class="conf-bar__label">{{ (viol.confidence * 100).toFixed(0) }}%</span>
+                        <span v-if="viol.plate_text" class="plate-text" style="font-size:0.8rem">{{ viol.plate_text }}</span>
+                      </div>
+                      <img v-if="viol.evidence_path" :src="getEvidenceUrl(viol.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = viol" title="Xem bằng chứng" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Vehicles -->
+                <div v-if="job.detections.length" class="detections-list">
+                  <h3><LucideIcon name="car" :size="16" /> Phương tiện phát hiện ({{ job.detections.length }})</h3>
+                  <div class="det-grid">
+                    <div v-for="(v, i) in job.detections" :key="'vd'+i" class="det-item" :class="`det-item--${v.category}`">
+                      <div class="det-item__left">
+                        <span class="det-idx">{{ i + 1 }}</span>
+                        <span class="badge" :class="classBadge(v.vehicle_class)">{{ classLabel(v.vehicle_class) }}</span>
+                        <span class="conf-bar__label">{{ (v.confidence * 100).toFixed(0) }}%</span>
+                      </div>
+                      <img v-if="v.evidence_path" :src="getEvidenceUrl(v.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = v" title="Xem ảnh" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Error state -->
+            <div v-if="job.state === 'error'" class="vc-error">
+              <LucideIcon name="alert-circle" :size="16" />
+              <span>{{ job.error_message || 'Lỗi không xác định' }}</span>
+              <button class="btn btn--ghost btn--sm" @click="retryJob(job)">Thử lại</button>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- Empty state -->
+      <div v-if="!videoJobs.length" class="empty-state">
+        <LucideIcon name="video-off" :size="48" />
+        <p>Chưa có video nào. Hãy tải lên video để bắt đầu phân tích.</p>
+      </div>
     </div>
 
-    <!-- Empty state -->
-    <div v-if="!videoJobs.length" class="empty-state">
-      <LucideIcon name="video-off" :size="48" />
-      <p>Chưa có video nào. Hãy tải lên video để bắt đầu phân tích.</p>
+    <!-- Mode 2: Image Analysis -->
+    <div v-if="activeMode === 'image'" class="mode-content">
+      <div class="image-upload-section">
+        <!-- Drop zone for Image -->
+        <div
+          class="drop-zone"
+          :class="{ 'drop-zone--active': imageDragOver }"
+          @dragover.prevent="imageDragOver = true"
+          @dragleave="imageDragOver = false"
+          @drop.prevent="handleImageDrop"
+          @click="triggerImageInput"
+        >
+          <input ref="imageFileInput" type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/bmp" style="display:none" @change="handleImageSelect" />
+          <div class="drop-content">
+            <div class="drop-icon-wrap"><LucideIcon name="image" :size="44" /></div>
+            <p class="drop-title">Kéo thả ảnh vào đây</p>
+            <p class="drop-sub">hoặc nhấn để chọn file ảnh · JPG, PNG, WEBP, BMP · Phân tích nhận diện AI tức thì</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Image Analysis Loading / Status -->
+      <div v-if="isAnalyzingImage" class="image-analyzing-card">
+        <div class="spinner"></div>
+        <span>Đang phân tích ảnh bằng các mô hình AI (Vehicles, Violations, Plates)...</span>
+      </div>
+
+      <!-- Image Analysis Error -->
+      <div v-if="imageError" class="vc-error" style="margin-top:16px">
+        <LucideIcon name="alert-circle" :size="16" />
+        <span>{{ imageError }}</span>
+        <button class="btn btn--ghost btn--sm" @click="runImageAnalysis">Thử lại</button>
+      </div>
+
+      <!-- Image Analysis Results -->
+      <div v-if="imageResult && !isAnalyzingImage" class="image-result-section animate-fade-in" style="margin-top:20px">
+        <div class="image-result-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+          <h2 style="margin:0; font-size:1.1rem; display:flex; align-items:center; gap:8px">
+            <LucideIcon name="file-check" :size="20" /> Kết quả phân tích ảnh: {{ imageResult.filename }}
+          </h2>
+          <button class="btn btn--ghost btn--sm" @click="clearImage">
+            <LucideIcon name="trash-2" :size="14" /> Xóa kết quả
+          </button>
+        </div>
+
+        <!-- Annotated Image Preview -->
+        <div class="image-preview-card" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-lg); padding:16px; margin-bottom:20px">
+          <h3 style="margin-top:0; font-size:0.95rem; color:var(--text-secondary); display:flex; align-items:center; gap:8px">
+            <LucideIcon name="eye" :size="16" /> Ảnh kết quả AI (Vẽ Bounding Boxes)
+          </h3>
+          <div style="text-align:center; background:var(--bg-inset); border-radius:var(--radius-md); overflow:hidden; padding:8px">
+            <img
+              :src="`data:image/jpeg;base64,${imageResult.annotated_image_base64}`"
+              alt="Annotated Result"
+              style="max-width:100%; max-height:550px; object-fit:contain; border-radius:var(--radius-md); cursor:pointer"
+              @click="evidenceModalItem = { evidence_path: null, annotated_b64: imageResult.annotated_image_base64, filename: imageResult.filename }"
+              title="Nhấn để xem kích thước đầy đủ"
+            />
+          </div>
+        </div>
+
+        <!-- Summary stats -->
+        <div class="vc-stats-row" style="margin-bottom:20px">
+          <div class="rs-card rs-card--blue"><LucideIcon name="car" :size="20" /><span class="rs-val">{{ imageResult.vehicle_count||0 }}</span><span class="rs-label">Phương tiện</span></div>
+          <div class="rs-card rs-card--red"><LucideIcon name="alert-triangle" :size="20" /><span class="rs-val">{{ imageResult.violation_count||0 }}</span><span class="rs-label">Vi phạm</span></div>
+          <div class="rs-card rs-card--yellow"><LucideIcon name="credit-card" :size="20" /><span class="rs-val">{{ imageResult.plate_count||0 }}</span><span class="rs-label">Biển số</span></div>
+        </div>
+
+        <!-- Violations List -->
+        <div v-if="imageResult.violations && imageResult.violations.length" class="detections-list violations-list" style="margin-bottom:20px">
+          <h3><LucideIcon name="alert-triangle" :size="16" /> Vi phạm phát hiện ({{ imageResult.violations.length }})</h3>
+          <div class="det-grid">
+            <div v-for="(viol, i) in imageResult.violations" :key="'img_v'+i" class="det-item det-item--violation">
+              <div class="det-item__left">
+                <span class="det-idx det-idx--danger">{{ i + 1 }}</span>
+                <span class="badge badge--violation" :class="'viol--' + viol.violation_type">{{ viol.violation_label }}</span>
+                <span class="conf-bar__label">{{ (viol.confidence * 100).toFixed(0) }}%</span>
+                <span v-if="viol.plate_text" class="plate-text" style="font-size:0.8rem">Biển số: {{ viol.plate_text }}</span>
+                <span v-if="viol.vehicle_class" style="font-size:0.8rem; color:var(--text-muted)">({{ classLabel(viol.vehicle_class) }})</span>
+              </div>
+              <img v-if="viol.evidence_path" :src="getEvidenceUrl(viol.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = viol" title="Xem bằng chứng" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Vehicles List -->
+        <div v-if="imageResult.vehicles && imageResult.vehicles.length" class="detections-list" style="margin-bottom:20px">
+          <h3><LucideIcon name="car" :size="16" /> Phương tiện phát hiện ({{ imageResult.vehicles.length }})</h3>
+          <div class="det-grid">
+            <div v-for="(v, i) in imageResult.vehicles" :key="'img_det'+i" class="det-item" :class="`det-item--${v.category}`">
+              <div class="det-item__left">
+                <span class="det-idx">{{ i + 1 }}</span>
+                <span class="badge" :class="classBadge(v.vehicle_class)">{{ classLabel(v.vehicle_class) }}</span>
+                <span class="conf-bar__label">{{ (v.confidence * 100).toFixed(0) }}%</span>
+              </div>
+              <img v-if="v.evidence_path" :src="getEvidenceUrl(v.evidence_path)" class="evidence-thumb" @click="evidenceModalItem = v" title="Xem ảnh" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Plates List -->
+        <div v-if="imageResult.plates && imageResult.plates.length" class="detections-list" style="border-left: 3px solid #eab308">
+          <h3><LucideIcon name="credit-card" :size="16" /> Biển số nhận diện ({{ imageResult.plates.length }})</h3>
+          <div class="det-grid">
+            <div v-for="(p, i) in imageResult.plates" :key="'img_p'+i" class="det-item">
+              <div class="det-item__left">
+                <span class="det-idx" style="background:rgba(234,179,8,0.15); color:#eab308">{{ i + 1 }}</span>
+                <span class="plate-text" style="font-weight:700">{{ p.plate_text || 'Chưa đọc được' }}</span>
+                <span v-if="p.province_name" class="badge badge--info">{{ p.province_name }}</span>
+                <span v-if="p.is_valid_plate || p.is_valid" class="badge badge--success">Hợp lệ</span>
+              </div>
+              <img v-if="p.plate_crop_path" :src="getEvidenceUrl(p.plate_crop_path)" class="evidence-thumb" @click="evidenceModalItem = { evidence_path: p.plate_crop_path, plate_text: p.plate_text }" title="Xem crop biển số" />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Evidence Modal -->
@@ -229,12 +368,13 @@
           <button @click="evidenceModalItem = null" class="modal-close">✕</button>
         </div>
         <div class="modal-body">
-          <img :src="getEvidenceUrl(evidenceModalItem.evidence_path)" alt="Evidence" style="width:100%;border-radius:var(--radius-md);display:block" />
+          <img v-if="evidenceModalItem.evidence_path" :src="getEvidenceUrl(evidenceModalItem.evidence_path)" alt="Evidence" style="width:100%;border-radius:var(--radius-md);display:block" />
+          <img v-else-if="evidenceModalItem.annotated_b64" :src="`data:image/jpeg;base64,${evidenceModalItem.annotated_b64}`" alt="Annotated" style="width:100%;border-radius:var(--radius-md);display:block" />
           <div class="evidence-details">
             <p v-if="evidenceModalItem.violation_label"><strong>Lỗi:</strong> <span class="badge badge--violation" :class="'viol--' + evidenceModalItem.violation_type">{{ evidenceModalItem.violation_label }}</span></p>
             <p v-if="evidenceModalItem.vehicle_class"><strong>Loại xe:</strong> {{ classLabel(evidenceModalItem.vehicle_class) }}</p>
             <p v-if="evidenceModalItem.plate_text"><strong>Biển số:</strong> <span class="plate-text">{{ evidenceModalItem.plate_text }}</span></p>
-            <p><strong>Thời gian:</strong> {{ formatTime(evidenceModalItem.created_at || evidenceModalItem.timestamp) }}</p>
+            <p v-if="evidenceModalItem.created_at || evidenceModalItem.timestamp"><strong>Thời gian:</strong> {{ formatTime(evidenceModalItem.created_at || evidenceModalItem.timestamp) }}</p>
           </div>
         </div>
       </div>
@@ -249,8 +389,10 @@ import LivePreviewFrame from '@/components/LivePreviewFrame.vue'
 import {
   uploadVideo, startAnalysis, getAnalysisStatus,
   pauseAnalysis, resumeAnalysis, seekAnalysis,
-  createWebSocket, getViolations, getDetections, getEvidenceUrl
+  createWebSocket, getViolations, getDetections, getEvidenceUrl,
+  analyzeImage
 } from '@/api/index.js'
+
 
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
 const CLASS_BADGES = { car: 'badge--success', truck: 'badge--warning', bus: 'badge--info', motorcycle: 'badge--danger' }
@@ -263,6 +405,68 @@ function stateLabel(s) {
   return map[s] || s
 }
 
+// Mode Tabs
+const activeMode = ref('video') // 'video' | 'image'
+
+// Single Image Analysis state
+const imageFileInput = ref(null)
+const selectedImageFile = ref(null)
+const imagePreviewUrl = ref(null)
+const isAnalyzingImage = ref(false)
+const imageError = ref(null)
+const imageResult = ref(null)
+const imageDragOver = ref(false)
+
+function triggerImageInput() {
+  imageFileInput.value?.click()
+}
+
+function handleImageSelect(e) {
+  const file = e.target.files?.[0]
+  if (file) setAndAnalyzeImage(file)
+}
+
+function handleImageDrop(e) {
+  imageDragOver.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (file && (file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp)$/i.test(file.name))) {
+    setAndAnalyzeImage(file)
+  }
+}
+
+function setAndAnalyzeImage(file) {
+  imageError.value = null
+  imageResult.value = null
+  selectedImageFile.value = file
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
+  imagePreviewUrl.value = URL.createObjectURL(file)
+  runImageAnalysis()
+}
+
+async function runImageAnalysis() {
+  if (!selectedImageFile.value || isAnalyzingImage.value) return
+  isAnalyzingImage.value = true
+  imageError.value = null
+  try {
+    const res = await analyzeImage(selectedImageFile.value)
+    imageResult.value = res
+  } catch (err) {
+    imageError.value = err.message || 'Phân tích ảnh thất bại'
+  } finally {
+    isAnalyzingImage.value = false
+  }
+}
+
+function clearImage() {
+  selectedImageFile.value = null
+  if (imagePreviewUrl.value) {
+    URL.revokeObjectURL(imagePreviewUrl.value)
+    imagePreviewUrl.value = null
+  }
+  imageResult.value = null
+  imageError.value = null
+}
+
 // Speed slider
 const speedSteps = [1, 2, 3, 5, 10, 15, 20, 30]
 const speedIndex = ref(0)
@@ -273,8 +477,7 @@ const videoJobs = ref([])
 const dragOver = ref(false)
 const evidenceModalItem = ref(null)
 
-// Ảnh preview realtime theo job_id — tách khỏi object reactive() sâu của job để đổi ảnh
-// mỗi frame không kéo theo re-render/diff toàn bộ card (progress bar, nút bấm...).
+// Ảnh preview realtime theo job_id
 const latestFrames = shallowReactive({})
 
 // Poll timers per job
@@ -556,6 +759,64 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Mode Tabs */
+.analysis-mode-tabs {
+  display: flex;
+  gap: 12px;
+  margin-bottom: var(--sp-xl);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 14px;
+}
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.mode-tab:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+  background: rgba(37,99,235,0.04);
+}
+.mode-tab--active {
+  background: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
+  box-shadow: 0 4px 14px rgba(37,99,235,0.3);
+}
+
+/* Image Analyzing Card */
+.image-analyzing-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  margin-top: 16px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(37,99,235,0.2);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* Upload + Settings Row */
 .upload-settings-row {
   display: grid;
