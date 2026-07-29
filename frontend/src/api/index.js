@@ -44,6 +44,16 @@ export const deleteViolation = (id) =>
 export const getViolationStats = (hours = 24) =>
   api.get('/api/violations/stats', { params: { hours } })
 
+// ── Red Light Configuration & Stats ───────────────────────────
+export const saveRedLightConfig = (config) =>
+  api.post('/api/config/red-light', config)
+
+export const getRedLightConfig = (sourceId) =>
+  api.get(`/api/config/red-light/${sourceId}`)
+
+export const getRedLightStats = (hours = 24) =>
+  api.get('/api/violations/red-light/stats', { params: { hours } })
+
 // ── Plates ───────────────────────────────────────────────────
 export const getPlateDetections = (params = {}) =>
   api.get('/api/plates', { params })

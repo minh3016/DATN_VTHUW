@@ -10,6 +10,7 @@ Thư mục chứa các model YOLOv8n đã huấn luyện (.pt) cho hệ thống 
 | `traffic_violation.pt` | Phát hiện vi phạm giao thông | `data_traffic_violation.yaml` | 6: No Seatbelt, Seatbelt, Using mobile phone, With Helmet, Without Helmet, undefined |
 | `license_plate.pt` | Phát hiện vị trí biển số xe | `data_license_plate.yaml` | 1: license_plate |
 | `license_ocr.pt` | Nhận diện ký tự trên biển số | `data_license_ocr.yaml` | 36: 0-9, A-Z |
+| `traffic_light.pt` | Nhận diện vị trí & trạng thái Đèn giao thông | `data_traffic_light.yaml` | 3: red_light, yellow_light, green_light |
 
 ## Thông tin training
 

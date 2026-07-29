@@ -1,0 +1,13 @@
+names:
+- red_light
+- yellow_light
+- green_light
+nc: 3
+roboflow:
+  license: CC BY 4.0
+  project: traffic-light-detection-international
+  url: https://universe.roboflow.com/roboflow-100/traffic-light-detection
+  version: 1
+test: ../test/images
+train: ../train/images
+val: ../valid/images

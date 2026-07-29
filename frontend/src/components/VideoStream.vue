@@ -8,7 +8,11 @@
         <span class="badge" :class="statusBadgeClass">{{ statusLabel }}</span>
       </div>
       <div class="stream-actions">
+        <span v-if="frameData?.traffic_light_status" class="tl-badge" :class="`tl-badge--${frameData.traffic_light_status}`">
+          {{ trafficLightBadgeText(frameData.traffic_light_status) }}
+        </span>
         <span v-if="frameData?.fps" class="fps-badge">{{ frameData.fps?.toFixed(1) }} FPS</span>
+        <button class="btn btn--ghost btn--sm" @click="showRedLightModal = true" title="Cấu hình Vạch Dừng Đèn Đỏ">🚦 Vạch dừng</button>
         <button class="btn btn--ghost btn--sm" @click="toggleFullscreen" title="Toàn màn hình">⛶</button>
       </div>
     </div>
@@ -117,12 +121,21 @@
         {{ classIcon(cls) }} {{ classLabel(cls) }}: {{ cnt }}
       </span>
     </div>
+
+    <!-- Red Light Config Modal -->
+    <RedLightConfigModal
+      :isOpen="showRedLightModal"
+      :sourceId="cameraId"
+      :previewImage="currentFrame ? `data:image/jpeg;base64,${currentFrame}` : ''"
+      @close="showRedLightModal = false"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
 import { createWebSocket, addCamera, removeCamera } from '@/api/index.js'
+import RedLightConfigModal from './RedLightConfigModal.vue'
 
 const props = defineProps({
   cameraId: { type: String, default: 'ESP32_01' },
@@ -140,6 +153,13 @@ function classBadge(c) { return CLASS_BADGES[c] || 'badge--info' }
 function classIcon(c) { return CLASS_ICONS[c] || 'Car' }
 function catLabel(c) { return CAT_LABELS[c] || c }
 
+function trafficLightBadgeText(status) {
+  if (status === 'red') return '🔴 ĐÈN ĐỎ'
+  if (status === 'yellow') return '🟡 ĐÈN VÀNG'
+  if (status === 'green') return '🟢 ĐÈN XANH'
+  return '⚪ KO XÁC ĐỊNH'
+}
+
 // ── State ──────────────────────────────────────────────────────
 const sourceType = ref('esp32')
 const mjpegUrl   = ref('')
@@ -152,6 +172,7 @@ const frameData    = ref(null)
 const canvasContainer = ref(null)
 const testing    = ref(false)
 const testResult = ref(null)
+const showRedLightModal = ref(false)
 
 let ws = null
 
@@ -457,4 +478,16 @@ onUnmounted(() => {
   font-size: 0.8rem;
 }
 .counts-label { color: var(--text-muted); margin-right: var(--sp-xs); }
+
+/* Traffic Light badge */
+.tl-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+.tl-badge--red { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); }
+.tl-badge--yellow { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); }
+.tl-badge--green { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); }
+.tl-badge--unknown { background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.4); }
 </style>

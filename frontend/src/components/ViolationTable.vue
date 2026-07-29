@@ -184,16 +184,28 @@ function nextPage() {
 }
 
 function formatDate(iso) {
-  try { return format(new Date(iso), 'dd/MM/yy HH:mm:ss', { locale: vi }) }
+  try {
+    // Backend lưu thời gian UTC (datetime.utcnow()) nhưng chuỗi ISO có thể thiếu suffix 'Z'.
+    // Thêm 'Z' nếu chuỗi không có timezone info để JS Date hiểu đúng là UTC,
+    // sau đó format() sẽ tự chuyển sang múi giờ local (GMT+7) của trình duyệt.
+    let isoStr = String(iso)
+    if (isoStr && !isoStr.endsWith('Z') && !isoStr.includes('+') && !isoStr.includes('-', 10)) {
+      isoStr += 'Z'
+    }
+    return format(new Date(isoStr), 'dd/MM/yy HH:mm:ss', { locale: vi })
+  }
   catch { return iso }
 }
 
 function violationLabel(type) {
   const map = {
-    no_helmet: 'Khong MBH',
-    wrong_lane: 'Sai lan',
-    red_light: 'Vuot den do',
-    speeding: 'Toc do cao',
+    no_helmet: 'Không mũ bảo hiểm',
+    no_seatbelt: 'Không dây an toàn',
+    using_phone: 'Sử dụng điện thoại',
+    red_light_violation: 'Vượt đèn đỏ',
+    red_light: 'Vượt đèn đỏ',
+    wrong_lane: 'Sai làn đường',
+    speeding: 'Quá tốc độ',
   }
   return map[type] || type
 }
@@ -201,9 +213,12 @@ function violationLabel(type) {
 function badgeClass(type) {
   const map = {
     no_helmet: 'badge--danger',
-    wrong_lane: 'badge--warning',
+    no_seatbelt: 'badge--warning',
+    using_phone: 'badge--warning',
+    red_light_violation: 'badge--danger',
     red_light: 'badge--danger',
-    speeding: 'badge--warning',
+    wrong_lane: 'badge--warning',
+    speeding: 'badge--danger',
   }
   return map[type] || 'badge--info'
 }

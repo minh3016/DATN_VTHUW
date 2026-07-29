@@ -40,21 +40,35 @@ PLATE_OCR_MODEL_PATH: str = os.getenv(
     "PLATE_OCR_MODEL_PATH", str(MODELS_DIR / "license_ocr.pt")
 )
 
+# Traffic Light Detection (YOLOv8n – 3 classes: red_light, yellow_light, green_light)
+TRAFFIC_LIGHT_MODEL_PATH: str = os.getenv(
+    "TRAFFIC_LIGHT_MODEL_PATH", str(MODELS_DIR / "traffic_light.pt")
+)
+
 # ── Confidence thresholds ─────────────────────────────────────
 VEHICLE_CONF: float = float(os.getenv("VEHICLE_CONF", "0.25"))
 VIOLATION_CONF: float = float(os.getenv("VIOLATION_CONF", "0.35"))
 PLATE_CONF: float = float(os.getenv("PLATE_CONF", "0.30"))
 PLATE_OCR_CONF: float = float(os.getenv("PLATE_OCR_CONF", "0.25"))
+TRAFFIC_LIGHT_CONF: float = float(os.getenv("TRAFFIC_LIGHT_CONF", "0.30"))
 
 # ── Module toggles (bật/tắt từng module) ─────────────────────
 ENABLE_VEHICLE_DETECTION: bool = os.getenv("ENABLE_VEHICLE_DETECTION", "true").lower() == "true"
 ENABLE_VIOLATION_DETECTION: bool = os.getenv("ENABLE_VIOLATION_DETECTION", "true").lower() == "true"
 ENABLE_PLATE_RECOGNITION: bool = os.getenv("ENABLE_PLATE_RECOGNITION", "true").lower() == "true"
+ENABLE_RED_LIGHT_DETECTION: bool = os.getenv("ENABLE_RED_LIGHT_DETECTION", "true").lower() == "true"
 
 # Bật object tracking (ByteTrack) để định danh phương tiện ổn định xuyên frame,
 # thay cho dedup ad-hoc theo IOU/containment. TẮT sẽ rollback về hành vi dedup cũ
 # (buffer trượt N frame) — dùng khi cần so sánh/khắc phục sự cố.
 ENABLE_OBJECT_TRACKING: bool = os.getenv("ENABLE_OBJECT_TRACKING", "true").lower() == "true"
+
+# ── Cấu hình vạch dừng & ROI Đèn đỏ mặc định theo tỉ lệ khung hình (0.0 -> 1.0) ──
+# Vạch dừng mặc định ngang qua 65% chiều cao khung hình: [(x1_ratio, y1_ratio), (x2_ratio, y2_ratio)]
+DEFAULT_STOPPING_LINE_RATIO = [(0.05, 0.65), (0.95, 0.65)]
+# Vùng ROI đèn giao thông mặc định ở góc trên bên phải (x1_ratio, y1_ratio, x2_ratio, y2_ratio)
+DEFAULT_TRAFFIC_LIGHT_ROI_RATIO = (0.65, 0.02, 0.98, 0.45)
+
 
 # ── Frame processing ──────────────────────────────────────────
 # Kích thước tối đa cho frame trước khi xử lý (giữ nguyên độ phân giải gốc nếu <= giới hạn)

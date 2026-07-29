@@ -168,7 +168,14 @@ function showEvidence(path) { modalSrc.value = getEvUrl(path) }
 
 function formatDate(d) {
   if (!d) return '--'
-  try { return new Date(d).toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' }) }
+  try {
+    // Backend lưu UTC, chuỗi ISO có thể thiếu suffix 'Z' → thêm 'Z' để JS Date hiểu đúng là UTC
+    let isoStr = String(d)
+    if (isoStr && !isoStr.endsWith('Z') && !isoStr.includes('+') && !isoStr.includes('-', 10)) {
+      isoStr += 'Z'
+    }
+    return new Date(isoStr).toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' })
+  }
   catch { return d }
 }
 

@@ -50,12 +50,28 @@ class ViolationDetection(BaseModel):
     """Kết quả phát hiện vi phạm giao thông"""
     bbox: BoundingBox
     class_id: int
-    violation_type: str      # "no_seatbelt" | "using_phone" | "no_helmet"
-    violation_label: str     # "Không thắt dây an toàn" | "Sử dụng điện thoại" | "Không đội MBH"
+    violation_type: str      # "no_seatbelt" | "using_phone" | "no_helmet" | "red_light_violation"
+    violation_label: str     # "Không thắt dây an toàn" | "Sử dụng điện thoại" | "Không đội MBH" | "Vượt đèn đỏ"
     is_violation: bool = True  # True = vi phạm, False = hợp lệ
     vehicle_class: Optional[str] = None
     plate_text: Optional[str] = None
     vehicle_track_id: Optional[int] = None  # track_id của xe được gắn vi phạm này (định danh dedup)
+
+
+class TrafficLightDetection(BaseModel):
+    """Kết quả phát hiện đèn giao thông và màu tín hiệu"""
+    bbox: BoundingBox
+    state: str               # "red_light" | "yellow_light" | "green_light"
+    label: str               # "Đèn đỏ" | "Đèn vàng" | "Đèn xanh"
+    confidence: float = 0.0
+
+
+class RedLightConfig(BaseModel):
+    """Cấu hình Vạch dừng & Vùng đèn giao thông cho từng camera / video source"""
+    source_id: str = "CAM_01"  # camera_id hoặc job_id
+    stopping_line_ratio: List[List[float]] = [[0.05, 0.65], [0.95, 0.65]]  # [(x1, y1), (x2, y2)] theo tỉ lệ [0.0 - 1.0]
+    traffic_light_roi_ratio: List[float] = [0.65, 0.02, 0.98, 0.45]        # [x1, y1, x2, y2] theo tỉ lệ [0.0 - 1.0]
+    enabled: bool = True
 
 
 class CharDetection(BaseModel):
@@ -92,7 +108,10 @@ class FrameAnalysisResult(BaseModel):
     # Violations
     violations: List[ViolationDetection] = []
     violation_count: int = 0
-    counts_by_violation: Dict[str, int] = {}  # {"no_helmet": 2, "no_seatbelt": 1}
+    counts_by_violation: Dict[str, int] = {}  # {"no_helmet": 2, "no_seatbelt": 1, "red_light_violation": 1}
+    # Traffic Lights & Red Light Violation
+    traffic_lights: List[TrafficLightDetection] = []
+    traffic_light_status: str = "unknown"     # "red" | "yellow" | "green" | "unknown"
     # Plates
     plates: List[PlateDetection] = []
     plate_count: int = 0

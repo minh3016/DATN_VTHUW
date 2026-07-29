@@ -61,6 +61,7 @@ from .config import (
     CORS_ORIGINS, FRAME_WIDTH, FRAME_HEIGHT, PROCESS_FPS,
     EVIDENCE_DIR, UPLOAD_DIR, MAX_UPLOAD_DURATION_SEC, MAX_UPLOAD_SIZE_MB,
     ENABLE_VEHICLE_DETECTION, ENABLE_VIOLATION_DETECTION, ENABLE_PLATE_RECOGNITION,
+    ENABLE_RED_LIGHT_DETECTION, DEFAULT_STOPPING_LINE_RATIO, DEFAULT_TRAFFIC_LIGHT_ROI_RATIO,
     ENABLE_ROI, ROI_X1, ROI_Y1, ROI_X2, ROI_Y2,
     ENABLE_FRAME_UPSCALE, UPSCALE_MIN_WIDTH, UPSCALE_TARGET_WIDTH,
     ENABLE_FRAME_ENHANCE, YOLO_INFER_SIZE, SAVE_ANNOTATED_EVIDENCE,
@@ -90,12 +91,15 @@ from .database import (
     delete_plate_detection,
     get_plate_stats,
     get_export_data,
+    save_red_light_config,
+    get_red_light_config,
 )
 from .models import (
     DetectionCreate,
     DetectionResponse,
     ViolationCreate,
     ViolationResponse,
+    ViolationDetection,
     MjpegStreamRequest,
     ProcessVideoRequest,
     CameraInfo,
@@ -104,11 +108,13 @@ from .models import (
     AnalysisJobStatus,
     PlateDetectionCreate,
     PlateDetectionResponse,
+    RedLightConfig,
 )
 from .websocket_manager import manager
 from .services.vehicle_detector import vehicle_detector
 from .services.violation_detector import violation_detector
 from .services.plate_recognizer import plate_recognizer
+from .services.traffic_light_detector import traffic_light_detector
 from .services.mjpeg_reader import MJPEGReader
 from .utils.image_utils import (
     numpy_to_base64,
@@ -121,6 +127,7 @@ from .utils.image_utils import (
 )
 from .utils.evidence_storage import save_evidence, get_evidence_path, save_plate_evidence
 from .utils.tracker import create_tracker, is_tracking_available
+from .utils.line_crossing import LineCrossingTracker, convert_ratio_line_to_pixels, convert_ratio_roi_to_pixels
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,6 +147,10 @@ _analysis_tasks: Dict[str, asyncio.Task] = {}
 _analysis_running_events: Dict[str, asyncio.Event] = {}
 # Seek control: target frame index per job (None = no seek)
 _analysis_seek_targets: Dict[str, Optional[int]] = {}
+
+# Red Light Crossing trackers & Config Cache
+_line_trackers: Dict[str, LineCrossingTracker] = {}
+_red_light_configs_cache: Dict[str, dict] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +181,8 @@ async def lifespan(app: FastAPI):
         violation_detector.load()
     if ENABLE_PLATE_RECOGNITION:
         plate_recognizer.load()
+    if ENABLE_RED_LIGHT_DETECTION:
+        traffic_light_detector.load()
 
     logger.info("Traffic Violation Detection service sẵn sàng")
     yield
@@ -300,6 +313,61 @@ def _process_frame(
     if ENABLE_PLATE_RECOGNITION and plate_recognizer.is_loaded:
         plates = plate_recognizer.detect_plates(detect_frame, imgsz=infer_size)
 
+    # ⑤ Red Light & Traffic Light Detection
+    traffic_lights = []
+    traffic_light_status = "unknown"
+    rl_cfg = None  # Khởi tạo sớm tránh NameError khi dùng ở phần crossing bên dưới
+    if ENABLE_RED_LIGHT_DETECTION:
+        rl_cfg = _red_light_configs_cache.get(camera_id)
+        if not rl_cfg:
+            rl_cfg = {
+                "stopping_line_ratio": DEFAULT_STOPPING_LINE_RATIO,
+                "traffic_light_roi_ratio": DEFAULT_TRAFFIC_LIGHT_ROI_RATIO,
+                "enabled": True,
+            }
+
+        if rl_cfg.get("enabled", True):
+            tl_roi_px = convert_ratio_roi_to_pixels(
+                rl_cfg.get("traffic_light_roi_ratio", DEFAULT_TRAFFIC_LIGHT_ROI_RATIO),
+                w_up, h_up
+            )
+            traffic_lights = traffic_light_detector.detect(detect_frame, roi_box=tl_roi_px)
+            # Sử dụng debounced status thay vì raw để tránh nhảy trạng thái do nhiễu 1 frame
+            traffic_light_status = traffic_light_detector.get_debounced_status(traffic_lights, camera_id=camera_id)
+
+            # Draw Traffic Light ROI Box
+            tx1, ty1, tx2, ty2 = tl_roi_px
+            cv2.rectangle(annotated, (tx1, ty1), (tx2, ty2), (255, 200, 0), 1)
+            cv2.putText(
+                annotated,
+                f"ROI DEN ([{traffic_light_status.upper()}])",
+                (tx1 + 5, ty1 + 15),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 200, 0),
+                1,
+                cv2.LINE_AA
+            )
+
+            # Draw Stopping Line
+            stopping_line_px = convert_ratio_line_to_pixels(
+                rl_cfg.get("stopping_line_ratio", DEFAULT_STOPPING_LINE_RATIO),
+                w_up, h_up
+            )
+            line_color = (0, 0, 255) if traffic_light_status == "red" else ((0, 255, 255) if traffic_light_status == "yellow" else (0, 255, 0))
+            line_thick = 3 if traffic_light_status == "red" else 2
+            cv2.line(annotated, stopping_line_px[0], stopping_line_px[1], line_color, line_thick)
+            cv2.putText(
+                annotated,
+                f"VACH DUNG DENG DO ([{traffic_light_status.upper()}])",
+                (stopping_line_px[0][0] + 5, stopping_line_px[0][1] - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                line_color,
+                1,
+                cv2.LINE_AA
+            )
+
     # Phân loại đối tượng: khi ROI tắt, tất cả đều active
     if not ENABLE_ROI:
         # Không filter – toàn bộ detections đều active
@@ -347,6 +415,44 @@ def _process_frame(
                     thickness=1,
                 )
 
+    # Cập nhật LineCrossingTracker và phát hiện xe VƯỢT ĐÈN ĐỎ
+    if ENABLE_RED_LIGHT_DETECTION and rl_cfg is not None and rl_cfg.get("enabled", True):
+        if camera_id not in _line_trackers:
+            _line_trackers[camera_id] = LineCrossingTracker()
+        tracker_inst = _line_trackers[camera_id]
+
+        stopping_line_px = convert_ratio_line_to_pixels(
+            rl_cfg.get("stopping_line_ratio", DEFAULT_STOPPING_LINE_RATIO),
+            w_up, h_up
+        )
+
+        # Tick frame counter cho LineCrossingTracker
+        tracker_inst.tick_frame()
+
+        for idx, v in enumerate(active_vehicles):
+            tid = v.track_id if v.track_id is not None else (1000 + idx)
+            xc = (v.bbox.x1 + v.bbox.x2) / 2.0
+            yc = v.bbox.y2
+            tracker_inst.update_position(tid, xc, yc)
+
+            # Nếu trạng thái Đèn = RED và xe CẮT VẠCH DỪNG theo hướng xuôi -> Thêm vi phạm vượt đèn đỏ
+            if traffic_light_status == "red":
+                if tracker_inst.check_crossing(tid, stopping_line_px, forward_only=True):
+                    red_viol = ViolationDetection(
+                        bbox=v.bbox,
+                        class_id=99,
+                        violation_type="red_light_violation",
+                        violation_label="Vượt đèn đỏ",
+                        is_violation=True,
+                        vehicle_class=v.class_name,
+                        vehicle_track_id=tid
+                    )
+                    active_violations.append(red_viol)
+
+        # Dọn dẹp track cũ không cập nhật > 50 frame để tránh memory leak
+        if tracker_inst._frame_counter % 100 == 0:
+            tracker_inst.cleanup_stale_tracks(max_age=50)
+
     # ④ Khớp không gian (Spatial matching) giữa vi phạm, biển số với xe tương ứng (chỉ với đối tượng trong ROI)
     from .utils.image_utils import calculate_containment_ratio
 
@@ -388,7 +494,7 @@ def _process_frame(
         if not viol.vehicle_class:
             if viol.violation_type == "no_helmet":
                 viol.vehicle_class = "motorcycle"
-            elif viol.violation_type == "no_seatbelt":
+            elif viol.violation_type in ("no_seatbelt", "red_light_violation"):
                 viol.vehicle_class = "car"
             else:
                 viol.vehicle_class = "motorcycle"
@@ -403,9 +509,17 @@ def _process_frame(
             f"{v.class_name} {v.bbox.conf:.0%}", color,
         )
 
+    # Traffic Lights (cyan/yellow)
+    for tl in traffic_lights:
+        draw_bounding_box(
+            annotated,
+            int(tl.bbox.x1), int(tl.bbox.y1), int(tl.bbox.x2), int(tl.bbox.y2),
+            f"{tl.label} {tl.confidence:.0%}", (0, 255, 255),
+        )
+
     # Violations (red tones) - thick border
     for viol in active_violations:
-        color = violation_detector.get_color(viol.violation_type)
+        color = (0, 0, 255) if viol.violation_type == "red_light_violation" else violation_detector.get_color(viol.violation_type)
         label = f"VP: {viol.violation_label} {viol.bbox.conf:.0%}"
         if viol.plate_text:
             label += f" ({viol.plate_text})"
@@ -447,8 +561,7 @@ def _process_frame(
         camera_id=camera_id,
     )
 
-    # ⑦ Encode annotated frame — ảnh preview gửi qua WebSocket được thu nhỏ riêng
-    # (giảm payload/độ trễ hiển thị), KHÔNG ảnh hưởng "annotated_frame" full-res dùng lưu evidence.
+    # ⑦ Encode annotated frame
     preview = annotated
     h_ann, w_ann = annotated.shape[:2]
     if w_ann > WS_PREVIEW_MAX_WIDTH:
@@ -467,13 +580,15 @@ def _process_frame(
         "violation_count": violation_count,
         "violations": [viol.model_dump() for viol in violations],
         "counts_by_violation": counts_by_violation,
+        # Traffic Lights
+        "traffic_lights": [tl.model_dump() for tl in traffic_lights],
+        "traffic_light_status": traffic_light_status,
         # Plates
         "plate_count": plate_count,
         "plates": [p.model_dump() for p in plates],
         # Meta
         "fps": fps,
         "frame_base64": frame_b64,
-        # Annotated frame numpy (dùng để lưu evidence có bounding box)
         "annotated_frame": annotated,
     }
 
@@ -492,6 +607,7 @@ async def health_check():
             "vehicle_detector": vehicle_detector.is_loaded,
             "violation_detector": violation_detector.is_loaded,
             "plate_recognizer": plate_recognizer.is_loaded,
+            "traffic_light_detector": traffic_light_detector.is_loaded,
         },
         "modules": {
             "vehicle_detection": ENABLE_VEHICLE_DETECTION,
@@ -645,6 +761,58 @@ async def stats(hours: int = Query(24, ge=1)):
 @app.get("/api/violations/stats")
 async def violation_stats(hours: int = Query(24, ge=1)):
     return await get_violation_stats(hours)
+
+
+# ---------------------------------------------------------------------------
+# Red Light Violation & Configuration APIs
+# ---------------------------------------------------------------------------
+
+@app.post("/api/config/red-light")
+async def update_red_light_config(config: RedLightConfig):
+    """Lưu/Cập nhật vị trí Vạch dừng & ROI Đèn giao thông cho camera/video source"""
+    cfg_dict = config.model_dump()
+    success = await save_red_light_config(cfg_dict)
+    if success:
+        _red_light_configs_cache[config.source_id] = cfg_dict
+        return {"message": f"Cập nhật cấu hình Đèn đỏ cho {config.source_id} thành công", "config": cfg_dict}
+    raise HTTPException(500, "Không thể lưu cấu hình Đèn đỏ vào MongoDB")
+
+
+@app.get("/api/config/red-light/{source_id}")
+async def fetch_red_light_config(source_id: str):
+    """Lấy cấu hình Vạch dừng & ROI Đèn giao thông theo source_id"""
+    if source_id in _red_light_configs_cache:
+        return _red_light_configs_cache[source_id]
+    
+    cfg = await get_red_light_config(source_id)
+    if cfg:
+        _red_light_configs_cache[source_id] = cfg
+        return cfg
+    
+    # Trả về cấu hình mặc định theo tỷ lệ khung hình
+    default_cfg = {
+        "source_id": source_id,
+        "stopping_line_ratio": DEFAULT_STOPPING_LINE_RATIO,
+        "traffic_light_roi_ratio": DEFAULT_TRAFFIC_LIGHT_ROI_RATIO,
+        "enabled": True,
+    }
+    return default_cfg
+
+
+@app.get("/api/violations/red-light/stats")
+async def red_light_violation_stats(hours: int = Query(24, ge=1)):
+    """Thống kê vi phạm vượt đèn đỏ riêng biệt"""
+    violations = await get_violations(
+        skip=0,
+        limit=1000,
+        violation_type="red_light_violation"
+    )
+    return {
+        "period_hours": hours,
+        "total_red_light_violations": len(violations),
+        "recent_violations": violations[:10]
+    }
+
 
 
 # ---------------------------------------------------------------------------
@@ -1216,6 +1384,12 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
         cumulative_by_category: dict = {}
         cumulative_by_violation: dict = {}
 
+        # Pre-load Red Light config cho job_id nếu có trong DB
+        if job_id not in _red_light_configs_cache:
+            cfg = await get_red_light_config(job_id)
+            if cfg:
+                _red_light_configs_cache[job_id] = cfg
+
         # ── Object tracking (ByteTrack) — định danh ổn định xuyên frame ──
         # 1 tracker RIÊNG cho job này (không chia sẻ giữa các video chạy song song).
         tracker = create_tracker() if ENABLE_OBJECT_TRACKING else None
@@ -1296,7 +1470,7 @@ async def _analyze_video_task(job_id: str, video_path: str, user_frame_skip: int
             try:
                 result = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda f=frame, p=processed: _process_frame(f, frame_id=p, camera_id="UPLOAD", tracker=tracker),
+                    lambda f=frame, p=processed, jid=job_id: _process_frame(f, frame_id=p, camera_id=jid, tracker=tracker),
                 )
             except Exception as e:
                 logger.warning(f"Frame {processed} inference error: {e}")
@@ -1685,6 +1859,12 @@ async def _stream_mjpeg(camera_id: str, reader: MJPEGReader,
                         frame_skip: int = 2, reconnect: bool = True):
     """Background task: read MJPEG stream and process with all AI modules."""
     frame_idx = 0
+
+    # Pre-load Red Light config cho camera_id
+    if camera_id not in _red_light_configs_cache:
+        cfg = await get_red_light_config(camera_id)
+        if cfg:
+            _red_light_configs_cache[camera_id] = cfg
 
     # 1 tracker RIÊNG cho camera này (không chia sẻ giữa các stream khác nhau)
     tracker = create_tracker() if ENABLE_OBJECT_TRACKING else None

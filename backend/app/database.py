@@ -72,6 +72,10 @@ async def _ensure_indexes() -> None:
     await plates.create_index([("camera_id", 1)])
     await plates.create_index([("is_valid", 1)])
 
+    # Red Light Configs indexes
+    rl_configs = _db["red_light_configs"]
+    await rl_configs.create_index([("source_id", 1)], unique=True)
+
 
 # ---------------------------------------------------------------------------
 # CRUD – Detections (vehicles)
@@ -526,5 +530,35 @@ async def get_export_data(data_type: str, days: int = 7, limit: int = 1000) -> L
     for doc in docs:
         doc["_id"] = str(doc["_id"])
     return docs
+
+
+# ---------------------------------------------------------------------------
+# CRUD – Red Light Configuration
+# ---------------------------------------------------------------------------
+
+async def save_red_light_config(config_data: dict) -> bool:
+    """Lưu hoặc cập nhật cấu hình Vạch dừng & ROI Đèn giao thông cho source_id (camera/job)"""
+    if _db is None:
+        return False
+    source_id = config_data.get("source_id", "CAM_01")
+    config_data["updated_at"] = datetime.utcnow()
+    
+    result = await _db["red_light_configs"].update_one(
+        {"source_id": source_id},
+        {"$set": config_data},
+        upsert=True
+    )
+    return result.acknowledged
+
+
+async def get_red_light_config(source_id: str) -> Optional[dict]:
+    """Lấy cấu hình Vạch dừng & ROI Đèn giao thông theo source_id"""
+    if _db is None:
+        return None
+    doc = await _db["red_light_configs"].find_one({"source_id": source_id})
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
 
 

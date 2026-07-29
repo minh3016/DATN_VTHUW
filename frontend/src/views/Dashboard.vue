@@ -405,7 +405,7 @@ async function handleExport() {
 }
 
 const CLASS_LABELS = { car: 'Xe con', truck: 'Xe tải', bus: 'Xe bus', motorcycle: 'Xe máy' }
-const VIOL_LABELS = { no_helmet: 'Không đội MBH', no_seatbelt: 'Không thắt dây', using_phone: 'Dùng điện thoại' }
+const VIOL_LABELS = { no_helmet: 'Không đội MBH', no_seatbelt: 'Không thắt dây', using_phone: 'Dùng điện thoại', red_light_violation: 'Vượt đèn đỏ', red_light: 'Vượt đèn đỏ' }
 function violLabel(v) { return VIOL_LABELS[v] || v }
 
 function confClass(c) {
